@@ -23,6 +23,7 @@ namespace KaguyaNative {
         [DllImport("user32.dll")] internal static extern bool IsWindowVisible(IntPtr h);
         [DllImport("user32.dll")] internal static extern bool IsIconic(IntPtr h);
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] internal static extern IntPtr WindowFromPoint(Point point);
         [DllImport("user32.dll")] internal static extern IntPtr GetWindow(IntPtr window,uint command);
         internal delegate bool WindowVisitor(IntPtr window,IntPtr argument);
         [DllImport("user32.dll")] internal static extern bool EnumWindows(WindowVisitor visitor,IntPtr argument);

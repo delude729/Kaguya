@@ -3,7 +3,20 @@ Add-Type -AssemblyName System.Drawing
 $root = Split-Path $PSScriptRoot -Parent
 $source = [Drawing.Bitmap]::FromFile((Join-Path $root 'assets\kaguya\idle.png'))
 try {
-    # Keep the complete idle artwork and its aspect ratio on a transparent square.
+    # A full-body sprite becomes unreadably narrow at tray sizes. Frame the head
+    # and shoulders using the artwork's visible width, excluding transparent margins.
+    $left = $source.Width; $top = $source.Height; $right = -1; $bottom = -1
+    for ($y = 0; $y -lt $source.Height; $y++) {
+        for ($x = 0; $x -lt $source.Width; $x++) {
+            if ($source.GetPixel($x, $y).A -gt 24) {
+                $left = [Math]::Min($left, $x); $top = [Math]::Min($top, $y)
+                $right = [Math]::Max($right, $x); $bottom = [Math]::Max($bottom, $y)
+            }
+        }
+    }
+    if ($right -lt $left) { throw 'Character artwork is empty' }
+    $portraitSize = [Math]::Min($right - $left + 1, $bottom - $top + 1)
+    $portrait = [Drawing.RectangleF]::new($left, $top, $portraitSize, $portraitSize)
     $frames = @()
     $sizes = @(16, 20, 24, 32, 40, 48, 64, 128, 256)
     foreach ($size in $sizes) {
@@ -15,11 +28,9 @@ try {
             $graphics.CompositingMode = [Drawing.Drawing2D.CompositingMode]::SourceCopy
             $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
             $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-            $scale = [Math]::Min($size / $source.Width, $size / $source.Height)
-            $width = [float]($source.Width * $scale)
-            $height = [float]($source.Height * $scale)
-            $destination = [Drawing.RectangleF]::new(($size - $width) / 2, ($size - $height) / 2, $width, $height)
-            $graphics.DrawImage($source, $destination)
+            $inset = [Math]::Max(0.5, $size * 0.04)
+            $destination = [Drawing.RectangleF]::new($inset, $inset, $size - 2 * $inset, $size - 2 * $inset)
+            $graphics.DrawImage($source, $destination, $portrait, [Drawing.GraphicsUnit]::Pixel)
             if ($size -eq 256) {
                 $bitmap.Save($stream, [Drawing.Imaging.ImageFormat]::Png)
             } else {

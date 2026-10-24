@@ -77,7 +77,8 @@ internal static class Checks {
     Point outside=pet.PointToScreen(new Point(5,5)),inside=pet.PointToScreen(new Point((int)(46*pet.Dpi),(int)(500*pet.Dpi)));
     Func<Point,IntPtr> pack=p=>new IntPtr((p.Y<<16)|(p.X&65535));
     Check(Native.SendMessage(pet.Handle,0x84,IntPtr.Zero,pack(outside)).ToInt32()==-1,"outside original regions passes through");
-    Check(Native.SendMessage(pet.Handle,0x84,IntPtr.Zero,pack(inside)).ToInt32()==1,"transparent margin receives Windows mouse input");
+    Check(Native.SendMessage(pet.Handle,0x84,IntPtr.Zero,pack(inside)).ToInt32()==-1,"transparent character margin rejects Windows mouse input");
+    Check(Native.WindowFromPoint(new Native.Point(inside.X,inside.Y))!=pet.Handle,"Windows routes transparent character margin to the underlying window");
     pet.Bubble="";
     pet.TogglePanel();Application.DoEvents();
     Check(pet.PanelOpen,"enabled panel responds to status bar");
@@ -138,14 +139,30 @@ internal static class Checks {
      checks.Add(new{name="UI raster scale",displayScale=pet.Dpi,assetScale=pet.UiAssetScale});
     }
     Check(pet.PanelOpen,"badge opens original panel");
-    Check(pet.Rect("character")==new RectangleF(45,375,290,300),"original 290x300 drag rectangle");
+    pet.TogglePanel();
+    // Let the panel and speech bubble disappear before inspecting blank pixels.
+    wait.Restart();while(wait.ElapsedMilliseconds<3400)Application.DoEvents();
     foreach(double scale in new double[]{.8,1,1.2}) {
      pet.State.scale=scale;
-     Check(pet.Target(new Point((int)(46*pet.Dpi),(int)(500*pet.Dpi)))=="character","transparent character margin draggable at scale "+scale);
+     foreach(string frame in new string[]{"idle","happy","tea","sleep"}) {
+      pet.Frame=frame;pet.State.sleeping=frame=="sleep";
+      using(Bitmap rendered=pet.RenderBitmap()) {
+       foreach(PointF logical in new PointF[]{new PointF(46,500),new PointF(334,500),new PointF(190,380)}) {
+        Point pixel=new Point((int)(logical.X*pet.Dpi),(int)(logical.Y*pet.Dpi));
+        Check(rendered.GetPixel(pixel.X,pixel.Y).A==0&&pet.Target(pixel)=="","left/right/top blank pixels pass through at scale "+scale+" frame "+frame+" point "+logical);
+        Point screen=pet.PointToScreen(pixel);
+        Check(Native.SendMessage(pet.Handle,0x84,IntPtr.Zero,pack(screen)).ToInt32()==-1,"blank pixel rejects native hit test at scale "+scale+" frame "+frame+" point "+logical);
+       }
+       Point body=new Point((int)(190*pet.Dpi),(int)(570*pet.Dpi));
+       Check(rendered.GetPixel(body.X,body.Y).A>100&&pet.Target(body)=="character","visible body stays interactive at scale "+scale+" frame "+frame);
+      }
+     }
+     pet.State.sleeping=false;pet.Frame="idle";
      RectangleF a=new RectangleF(0,0,1536,864),r=Geometry.Companion(scale);PointF left=Geometry.Clamp(-9999,-9999,a,r),right=Geometry.Clamp(9999,9999,a,r);
      Check(Math.Abs(left.X+r.Left)<.51&&Math.Abs(left.Y+r.Top)<.51&&Math.Abs(right.X+r.Right-1536)<.51&&Math.Abs(right.Y+r.Bottom-864)<.51,"all four original movement limits at scale "+scale);
      using(Bitmap b=pet.RenderBitmap())b.Save(Path.Combine(folder,"native-scale-"+scale.ToString(System.Globalization.CultureInfo.InvariantCulture)+".png"));
     }
+    pet.TogglePanel();
     pet.State.scale=1;pet.Feed(true);Check(pet.State.energy==95&&pet.State.mood==85&&pet.Frame=="tea","tea +20 energy +5 mood");
     pet.Pat();Check(pet.State.mood==93&&pet.Frame=="happy","pat +8 mood and happy frame");
     pet.Sleep(true);Check(pet.State.sleeping&&pet.Frame=="sleep","sleep frame");

@@ -53,7 +53,7 @@ electron tools\export-ui.cjs --ui-scale=1.25
 
 ## 验证
 
-`KaguyaPet.exe --self-test` 覆盖原命中区域、鼠标穿透、三档四向边界、5px 拖动阈值、动作与数值规则、置顶、隐藏找回，以及连续切换动作的非空画面和 GDI 句柄稳定性。截图和结果写入 `verification/`（不纳入 Git）。
+`KaguyaPet.exe --self-test` 覆盖按人物实际像素轮廓命中、三档大小和四种动作的左右及头顶空白鼠标穿透、Windows 对透明区域的窗口路由、三档四向边界、5px 拖动阈值、动作与数值规则、置顶、隐藏找回，以及连续切换动作的非空画面和 GDI 句柄稳定性。截图和结果写入 `verification/`（不纳入 Git）。
 
 自动检查不能代替真实显示器上的拖动、缩放和闪烁观察。
 

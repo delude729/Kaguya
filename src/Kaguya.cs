@@ -88,6 +88,7 @@ namespace KaguyaNative
         double bubbleUntil,imageUntil,shyStart=-10,panelChanged=-10,panelFrom,panelTo,lastTick,lastSave=-1;
         bool pendingSave;
         Bitmap cachedPanel;
+        byte[] characterPixels;
         string cachedPanelKey="",lastScene="";
         double meterClock;
         internal double Now {get{return clock.Elapsed.TotalSeconds;}}
@@ -241,7 +242,8 @@ namespace KaguyaNative
                 return "panel";
             }
             if(Rect("badge").Contains(q))return "badge";
-            if(Geometry.Character.Contains(q))return "character";
+            // Use the rendered silhouette, including the current scale and animation.
+            if(characterPixels!=null&&p.X>=0&&p.Y>=0&&p.X<ClientSize.Width&&p.Y<ClientSize.Height&&characterPixels[(p.Y*ClientSize.Width+p.X)*4+3]>24)return "character";
             return "";
         }
         protected override void WndProc(ref Message m) {
@@ -257,7 +259,7 @@ namespace KaguyaNative
         }
         protected override void OnMouseDown(MouseEventArgs e) {
             base.OnMouseDown(e);
-            if(e.Button==MouseButtons.Right){EndDrag();ShowMenu(PointToScreen(e.Location));return;}
+            if(e.Button==MouseButtons.Right){if(Target(e.Location)=="")return;EndDrag();ShowMenu(PointToScreen(e.Location));return;}
             if(e.Button!=MouseButtons.Left)return;
             pressedTarget=Target(e.Location);if(pressedTarget=="")return;
             pressed=true;downScreen=PointToScreen(e.Location);Capture=true;focus=pressedTarget;UpdateCursor(pressedTarget);
@@ -383,12 +385,15 @@ namespace KaguyaNative
             else DrawAlpha(g,image,new RectangleF(px,py,image.Width,image.Height),alpha);
             g.Restore(saved);
         }
+        Graphics FrameGraphics(Bitmap bitmap) {
+            Graphics g=Graphics.FromImage(bitmap);
+            g.ScaleTransform(Dpi,Dpi);g.SmoothingMode=SmoothingMode.AntiAlias;g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.PixelOffsetMode=PixelOffsetMode.HighQuality;g.TextRenderingHint=TextRenderingHint.AntiAliasGridFit;
+            return g;
+        }
         internal Bitmap RenderBitmap() {
             Bitmap b=new Bitmap(ClientSize.Width,ClientSize.Height,PixelFormat.Format32bppPArgb);
-            using(Graphics g=Graphics.FromImage(b)) {
-                g.Clear(Color.Transparent);g.ScaleTransform(Dpi,Dpi);g.SmoothingMode=SmoothingMode.AntiAlias;g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.PixelOffsetMode=PixelOffsetMode.HighQuality;g.TextRenderingHint=TextRenderingHint.AntiAliasGridFit;
-                // Alpha=1 preserves the original rectangular hit areas, including empty artwork margins.
-                using(Brush hit=new SolidBrush(Color.FromArgb(1,255,250,251))) {g.FillRectangle(hit,Geometry.Character);g.FillRectangle(hit,layout["badge"]);if(PanelOpen)g.FillRectangle(hit,Rect("panel"));}
+            using(Graphics g=FrameGraphics(b)) {
+                g.Clear(Color.Transparent);
                 using(Brush shadow=new SolidBrush(Color.FromArgb(20,116,65,89)))g.FillEllipse(shadow,142.5f,666,95,8);
                 double s=State.scale,cx=Geometry.Center(s),baseY=675,phase=(Now%(State.sleeping?6:4))/(State.sleeping?6:4);
                 double breathe=1+.012*(.5-.5*Math.Cos(phase*2*Math.PI));double angle=0;
@@ -407,6 +412,16 @@ namespace KaguyaNative
                     }
                 }else g.DrawImage(images[Frame],dest);
                 g.Restore(save);
+            }
+            // Capture before UI, speech bubbles and sleep text are composited, so
+            // decorations cannot become character targets. The shadow's alpha is <24.
+            if(characterPixels==null||characterPixels.Length!=b.Width*b.Height*4)characterPixels=new byte[b.Width*b.Height*4];
+            BitmapData locked=b.LockBits(new Rectangle(0,0,b.Width,b.Height),ImageLockMode.ReadOnly,PixelFormat.Format32bppPArgb);
+            try{Marshal.Copy(locked.Scan0,characterPixels,0,characterPixels.Length);}finally{b.UnlockBits(locked);}
+            using(Graphics g=FrameGraphics(b)) {
+                // Only actual controls retain their rectangular input surfaces.
+                using(Brush hit=new SolidBrush(Color.FromArgb(1,255,250,251))) {g.FillRectangle(hit,layout["badge"]);if(PanelOpen)g.FillRectangle(hit,Rect("panel"));}
+                double s=State.scale,cx=Geometry.Center(s);
                 if(State.sleeping){GraphicsState z=g.Save();g.TranslateTransform((float)cx,675);g.ScaleTransform((float)s,(float)s);TextAt(g,"z Z",21,C("#a18bb1"),new RectangleF(44,-260,65,28),StringAlignment.Center);g.Restore(z);}
                 double pa=PanelAlpha;
                 if(pa>.001) {
