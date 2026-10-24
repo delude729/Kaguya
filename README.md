@@ -13,10 +13,8 @@
 </div>
 
 <p align="center">
-  <img src="docs/states.png" width="880" alt="辉夜的四种状态：待机、摸摸头、一起喝茶、休息中">
+  <img src="docs/states.png" width="880" alt="辉夜的四种状态：待机、摸摸头、一起喝茶、休息中（茶会面板展开）">
 </p>
-
-<p align="center"><sub>待机 · 摸摸头 · 一起喝茶 · 休息中</sub></p>
 
 ## 快速开始
 
@@ -120,6 +118,10 @@ RunKaguya.cmd
 ## 致谢
 
 抓手指针资源来自 [Chromium](https://github.com/chromium/chromium)，许可证见 [`assets/cursors/CHROMIUM-LICENSE.txt`](assets/cursors/CHROMIUM-LICENSE.txt)。
+
+## 转载说明
+
+本项目（包括 README、角色图片、面板素材和打包后的程序）仅允许分享本仓库或 [Releases](../../releases/latest) 页面的原链接；请勿复制、镜像、搬运或二次发布到其他平台。如有合作或其他用途，请先联系作者。
 
 ---
 
