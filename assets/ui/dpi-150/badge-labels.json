@@ -1,0 +1,82 @@
+{
+  "badge-0-0": {
+    "badge-name": {
+      "x": 36.66667175292969,
+      "y": 20.66668701171875,
+      "width": 22,
+      "height": 14,
+      "fontSize": 11,
+      "text": "辉夜",
+      "color": "rgb(68, 60, 69)"
+    },
+    "badge-state": {
+      "x": 77,
+      "y": 22,
+      "width": 36,
+      "height": 11.333333969116211,
+      "fontSize": 9,
+      "text": "在你身边",
+      "color": "rgb(172, 142, 158)"
+    }
+  },
+  "badge-0-1": {
+    "badge-name": {
+      "x": 36.66667175292969,
+      "y": 20.66668701171875,
+      "width": 22,
+      "height": 14,
+      "fontSize": 11,
+      "text": "辉夜",
+      "color": "rgb(68, 60, 69)"
+    },
+    "badge-state": {
+      "x": 77,
+      "y": 22,
+      "width": 36,
+      "height": 11.333333969116211,
+      "fontSize": 9,
+      "text": "在你身边",
+      "color": "rgb(172, 142, 158)"
+    }
+  },
+  "badge-1-0": {
+    "badge-name": {
+      "x": 36.66667175292969,
+      "y": 20.66668701171875,
+      "width": 22,
+      "height": 14,
+      "fontSize": 11,
+      "text": "辉夜",
+      "color": "rgb(68, 60, 69)"
+    },
+    "badge-state": {
+      "x": 81.5,
+      "y": 22,
+      "width": 27,
+      "height": 11.333333969116211,
+      "fontSize": 9,
+      "text": "休息中",
+      "color": "rgb(172, 142, 158)"
+    }
+  },
+  "badge-1-1": {
+    "badge-name": {
+      "x": 36.66667175292969,
+      "y": 20.66668701171875,
+      "width": 22,
+      "height": 14,
+      "fontSize": 11,
+      "text": "辉夜",
+      "color": "rgb(68, 60, 69)"
+    },
+    "badge-state": {
+      "x": 81.5,
+      "y": 22,
+      "width": 27,
+      "height": 11.333333969116211,
+      "fontSize": 9,
+      "text": "休息中",
+      "color": "rgb(172, 142, 158)"
+    }
+  }
+}

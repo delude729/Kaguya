@@ -1,0 +1,14 @@
+# 本地构建产物
+/KaguyaPet.exe
+/单文件发布版/
+
+# 自动验证输出（仅保留构建和自检所需的基准文件）
+/verification/*
+!/verification/original-geometry.json
+
+# 常见临时文件
+*.user
+*.pdb
+.vs/
+bin/
+obj/
