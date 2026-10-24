@@ -13,8 +13,10 @@
 </div>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="440" alt="辉夜桌宠：茶会面板、角色和底部状态栏">
+  <img src="docs/states.png" width="880" alt="辉夜的四种状态：待机、摸摸头、一起喝茶、休息中">
 </p>
+
+<p align="center"><sub>待机 · 摸摸头 · 一起喝茶 · 休息中</sub></p>
 
 ## 快速开始
 
@@ -53,6 +55,15 @@
 | 暂时隐藏 | 从桌面隐藏，可从系统托盘找回 |
 
 元气每 30 秒减少 1；清醒时心情每 30 秒减少 1，休息时每 30 秒增加 1。两项数值都限制在 0–100。休息时不能喝茶或摸头。
+
+<details>
+<summary><strong>看看茶会面板</strong></summary>
+
+<p align="center">
+  <img src="docs/panel.png" width="680" alt="辉夜的茶会面板">
+</p>
+
+</details>
 
 <details>
 <summary><strong>看看右键菜单</strong></summary>
