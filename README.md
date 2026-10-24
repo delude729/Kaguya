@@ -6,7 +6,7 @@
 
 她会陪你喝茶、打瞌睡，也会在你忙碌的时候安静地待在屏幕一角。
 
-[![Download](https://img.shields.io/badge/Download-KaguyaPet.exe-c96b86?style=for-the-badge&logo=windows&logoColor=white)](../../releases/latest)
+[**⬇️ 下载最新版 · KaguyaPet.exe**](../../releases/latest) · [查看所有版本](../../releases)
 
 <sub>Windows 10 / 11 · 单文件免安装 · 完全离线</sub>
 
