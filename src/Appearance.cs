@@ -6,6 +6,41 @@ using System.IO;
 using System.Windows.Forms;
 
 namespace KaguyaNative {
+    internal sealed class WaterIntervalItem:ToolStripControlHost {
+        internal readonly TextBox Input;
+        readonly Func<int> current;
+        readonly Func<int,bool> save;
+        bool cancelled;
+        internal WaterIntervalItem(float dpi,Func<int> read,Func<int,bool> write):base(new IntervalRow(dpi)) {
+            Name="water-interval";current=read;save=write;Input=((IntervalRow)Control).Input;
+            Input.MouseDown+=delegate {RoundedMenu menu=Owner as RoundedMenu;if(menu!=null)menu.EnableKeyboardInput();Input.Focus();};
+            Input.Enter+=delegate {Input.BeginInvoke((Action)delegate {if(!Input.IsDisposed)Input.SelectAll();});};
+            Input.KeyPress+=delegate(object sender,KeyPressEventArgs e){if(!char.IsControl(e.KeyChar)&&!char.IsDigit(e.KeyChar))e.Handled=true;};
+            Input.KeyDown+=delegate(object sender,KeyEventArgs e){
+                if(e.KeyCode==Keys.Enter){e.Handled=true;e.SuppressKeyPress=true;if(Commit())((ContextMenuStrip)Owner).Close();}
+                else if(e.KeyCode==Keys.Escape){cancelled=true;Input.Text=current().ToString();e.Handled=true;e.SuppressKeyPress=true;((ContextMenuStrip)Owner).Close();}
+            };
+            Input.Leave+=delegate {if(!cancelled)Commit();};
+        }
+        internal void BeginSession(){cancelled=false;Input.Text=current().ToString();Input.ForeColor=Color.FromArgb(68,60,69);}
+        internal bool Commit(){int minutes;if(!int.TryParse(Input.Text,out minutes)||minutes<1||minutes>1440){Input.ForeColor=Color.Firebrick;return false;}Input.ForeColor=Color.FromArgb(68,60,69);return minutes==current()||save(minutes);}
+        internal void EndSession(){if(!cancelled)Commit();Input.Text=current().ToString();}
+    }
+    internal sealed class IntervalRow:UserControl {
+        internal readonly TextBox Input;
+        readonly Font textFont;
+        readonly float scale;
+        internal IntervalRow(float dpi) {
+            scale=dpi;
+            AutoScaleMode=AutoScaleMode.None;BackColor=Color.White;Size=new Size((int)(154*dpi),(int)(28*dpi));
+            textFont=new Font("Microsoft YaHei UI",11*dpi,FontStyle.Regular,GraphicsUnit.Pixel);Font=textFont;
+            Panel pill=new Panel{BackColor=Color.FromArgb(244,234,240),Bounds=new Rectangle((int)(69*dpi),(int)(4*dpi),(int)(43*dpi),(int)(20*dpi))};
+            using(GraphicsPath shape=new GraphicsPath()){float w=pill.Width,h=pill.Height,r=8*dpi;shape.AddArc(0,0,r,r,180,90);shape.AddArc(w-r,0,r,r,270,90);shape.AddArc(w-r,h-r,r,r,0,90);shape.AddArc(0,h-r,r,r,90,90);shape.CloseFigure();pill.Region=new Region(shape);}
+            Input=new TextBox{BorderStyle=BorderStyle.None,TextAlign=HorizontalAlignment.Center,MaxLength=4,BackColor=pill.BackColor,Font=textFont,Location=new Point(0,(int)(3*dpi)),Width=pill.Width};pill.Controls.Add(Input);Controls.Add(pill);
+        }
+        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);TextFormatFlags flags=TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.NoPadding;TextRenderer.DrawText(e.Graphics,"提醒间隔",textFont,new Rectangle((int)(14*scale),0,(int)(52*scale),Height),Color.FromArgb(20,20,20),flags);TextRenderer.DrawText(e.Graphics,"分钟",textFont,new Rectangle((int)(119*scale),0,(int)(32*scale),Height),Color.FromArgb(20,20,20),flags);}
+        protected override void Dispose(bool disposing){base.Dispose(disposing);if(disposing)textFont.Dispose();}
+    }
     // Direct equivalents of the original CSS cursor: grab / cursor: grabbing.
     internal sealed class HandCursors:IDisposable {
         internal readonly Cursor Grab,Grabbing;
@@ -18,6 +53,9 @@ namespace KaguyaNative {
         readonly float dpi;
         readonly Font menuFont;
         internal IntPtr PopupOwner;
+        bool keyboardInput;
+        IntPtr outsideClickHook;
+        Native.MouseHook outsideClickCallback;
         internal RoundedMenu(float scale) {
             dpi=scale;AutoSize=false;ShowImageMargin=false;ShowCheckMargin=false;
             BackColor=Color.White;ForeColor=Color.FromArgb(20,20,20);
@@ -26,6 +64,33 @@ namespace KaguyaNative {
             Renderer=new MenuRenderer(scale);DropShadowEnabled=false;
         }
         protected override CreateParams CreateParams {get{CreateParams p=base.CreateParams;p.ExStyle=(p.ExStyle|0x80|0x08000000)&~0x40000;if(PopupOwner!=IntPtr.Zero)p.Parent=PopupOwner;return p;}}
+        internal void EnableKeyboardInput(){keyboardInput=true;Native.SetWindowLong(Handle,-20,Native.GetWindowLong(Handle,-20)&~0x08000000);Native.SetForegroundWindow(Handle);}
+        protected override void WndProc(ref Message m){if(m.Msg==0x21){WaterIntervalItem field=Items["water-interval"] as WaterIntervalItem;if(field!=null&&field.Input.RectangleToScreen(field.Input.ClientRectangle).Contains(Cursor.Position)){EnableKeyboardInput();m.Result=(IntPtr)1;return;}}base.WndProc(ref m);}
+        protected override void OnOpening(System.ComponentModel.CancelEventArgs e){WaterIntervalItem field=Items["water-interval"] as WaterIntervalItem;if(field!=null)field.BeginSession();base.OnOpening(e);}
+        protected override void OnClosing(ToolStripDropDownClosingEventArgs e){
+            if(e.CloseReason==ToolStripDropDownCloseReason.ItemClicked)
+                foreach(ToolStripItem item in Items)if(item.Selected&&(string)item.Tag=="toggle"){e.Cancel=true;break;}
+            base.OnClosing(e);
+        }
+        protected override void OnOpened(EventArgs e){
+            base.OnOpened(e);
+            // A nonactivating tray menu may never receive deactivation or an
+            // outside click through WinForms' thread-local menu filter.
+            if(outsideClickHook==IntPtr.Zero){outsideClickCallback=ObserveMouse;outsideClickHook=Native.SetWindowsHookEx(14,outsideClickCallback,Native.GetModuleHandle(null),0);}
+        }
+        IntPtr ObserveMouse(int code,IntPtr message,IntPtr data){
+            int msg=message.ToInt32();
+            if(code>=0&&(msg==0x201||msg==0x204||msg==0x207||msg==0x20b)&&Visible){
+                Native.Point point=(Native.Point)System.Runtime.InteropServices.Marshal.PtrToStructure(data,typeof(Native.Point));
+                Point local=PointToClient(new Point(point.X,point.Y));
+                if(!ClientRectangle.Contains(local)||(Region!=null&&!Region.IsVisible(local)))
+                    BeginInvoke((Action)delegate{if(!IsDisposed&&Visible)Close(ToolStripDropDownCloseReason.AppClicked);});
+            }
+            // Observe only: the original click must still reach its target.
+            return Native.CallNextHookEx(outsideClickHook,code,message,data);
+        }
+        void StopObservingMouse(){if(outsideClickHook!=IntPtr.Zero){Native.UnhookWindowsHookEx(outsideClickHook);outsideClickHook=IntPtr.Zero;}outsideClickCallback=null;}
+        protected override void OnClosed(ToolStripDropDownClosedEventArgs e){StopObservingMouse();WaterIntervalItem field=Items["water-interval"] as WaterIntervalItem;if(field!=null)field.EndSession();if(keyboardInput){keyboardInput=false;Native.SetWindowLong(Handle,-20,Native.GetWindowLong(Handle,-20)|0x08000000);}base.OnClosed(e);}
         internal static Point AnchoredLocation(Point cursor,Size size,Rectangle workArea) {
             return new Point(Math.Max(workArea.Left,Math.Min(cursor.X,workArea.Right-size.Width)),
                 Math.Max(workArea.Top,Math.Min(cursor.Y-size.Height,workArea.Bottom-size.Height)));
@@ -46,7 +111,7 @@ namespace KaguyaNative {
             Size=new Size(width,height);UpdateShape();
         }
         protected override void OnSizeChanged(EventArgs e){base.OnSizeChanged(e);UpdateShape();}
-        protected override void Dispose(bool disposing){base.Dispose(disposing);if(disposing&&menuFont!=null)menuFont.Dispose();}
+        protected override void Dispose(bool disposing){if(disposing)StopObservingMouse();base.Dispose(disposing);if(disposing&&menuFont!=null)menuFont.Dispose();}
         void UpdateShape() {
             if(Width<2||Height<2)return;float d=Math.Min(28*(dpi==0?1:dpi),Math.Min(Width,Height));
             using(GraphicsPath path=new GraphicsPath()) {

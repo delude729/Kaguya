@@ -3,7 +3,7 @@
     "x": 25,
     "y": 56,
     "width": 330,
-    "height": 339
+    "height": 343
   },
   "close": {
     "x": 306,
@@ -37,7 +37,7 @@
   },
   "hide": {
     "x": 281,
-    "y": 359,
+    "y": 361,
     "width": 52,
     "height": 15
   },
@@ -77,24 +77,17 @@
     "width": 22.6875,
     "height": 14
   },
-  "scales": [
-    {
-      "x": 99,
-      "y": 357,
-      "width": 26,
-      "height": 19
-    },
-    {
-      "x": 127,
-      "y": 357,
-      "width": 26,
-      "height": 19
-    },
-    {
-      "x": 155,
-      "y": 357,
-      "width": 26,
-      "height": 19
-    }
-  ]
+  "size-slider": {
+    "x": 97,
+    "y": 355,
+    "width": 110,
+    "height": 27
+  },
+  "size-value": {
+    "x": 217,
+    "y": 362,
+    "width": 32,
+    "height": 13
+  },
+  "scales": []
 }

@@ -18,6 +18,7 @@ internal static class Checks {
    string settings=Path.Combine(folder,"settings-check-"+Guid.NewGuid().ToString("N"));
    using(Pet first=new Pet(true,settings)) {
     Check(first.State.topmost&&first.TopMost&&first.State.panelEnabled,"first launch defaults to topmost and panel enabled");
+    Check(first.State.scale==.7&&first.State.waterMinutes==30,"first launch without configuration defaults to 70 percent and 30 minutes");
     first.ActivateTarget("topmost");first.ActivateTarget("panel-enabled");
    }
    using(Pet second=new Pet(true,settings)) {
@@ -27,6 +28,10 @@ internal static class Checks {
    using(Pet third=new Pet(true,settings))Check(third.State.topmost&&third.TopMost&&third.State.panelEnabled,"enabled topmost and panel settings survive dispose and reload");
    File.WriteAllText(Path.Combine(settings,"pet-state.json"),"{\"mood\":42,\"topmost\":false}");
    using(Pet older=new Pet(true,settings))Check(!older.State.topmost&&!older.TopMost&&older.State.panelEnabled&&older.State.mood==42,"old settings retain explicit topmost false and default missing panel switch to enabled");
+   File.WriteAllText(Path.Combine(settings,"pet-state.json"),"{}");
+   using(Pet missing=new Pet(true,settings))Check(missing.State.scale==.7&&missing.State.waterMinutes==30,"missing scale and water interval fields default to 70 percent and 30 minutes");
+   File.WriteAllText(Path.Combine(settings,"pet-state.json"),"{\"scale\":1,\"waterMinutes\":90}");
+   using(Pet configured=new Pet(true,settings))Check(configured.State.scale==1&&configured.State.waterMinutes==90,"existing size and water interval override new defaults");
    File.WriteAllText(Path.Combine(settings,"pet-state.json"),"{\"mood\":42,\"milk\":37,\"topmost\":false}");
    using(Pet legacy=new Pet(true,settings))Check(legacy.State.energy==37&&legacy.State.mood==42&&!legacy.State.topmost,"legacy energy key migrates without resetting saved state");
    string migrated=File.ReadAllText(Path.Combine(settings,"pet-state.json"));
@@ -36,11 +41,21 @@ internal static class Checks {
    using(Pet smaller=new Pet(true,settings))smaller.SetScale(.73,true);
    using(Pet reloaded=new Pet(true,settings))Check(reloaded.State.scale==.73,"custom 73 percent size survives save and reload");
    Check(Pet.NormalizeScale(double.NaN)==1&&Pet.NormalizeScale(double.PositiveInfinity)==1&&Pet.NormalizeScale(.1)==.5&&Pet.NormalizeScale(2)==1.2,"invalid scale fallback and slider range limits");
+   using(Pet waterSettings=new Pet(true,settings)) {
+    Check(!waterSettings.State.waterEnabled&&waterSettings.State.waterMinutes==30,"legacy settings default water reminders to off and 30 minutes");
+    Check(!waterSettings.SetWaterReminder(true,0)&&!waterSettings.SetWaterReminder(true,1441)&&!waterSettings.State.waterEnabled,"invalid water intervals do not enable reminders");
+    waterSettings.SetWaterReminder(true,45);
+   }
+   using(Pet waterReloaded=new Pet(true,settings))Check(waterReloaded.State.waterEnabled&&waterReloaded.State.waterMinutes==45,"water interval and enabled setting survive reload");
+   File.WriteAllText(Path.Combine(settings,"pet-state.json"),"{\"waterMinutes\":-1}");
+   using(Pet invalidWater=new Pet(true,settings))Check(invalidWater.State.waterMinutes==1,"invalid saved water interval is clamped");
    Directory.Delete(settings,true);
+   CheckWaterReminder(folder);
    using(Pet pet=new Pet(true)) {
     pet.Show();Application.DoEvents();
     Check(!pet.PanelOpen,"startup panel collapsed");
-    Check(pet.State.scale==1&&pet.State.mood==80&&pet.State.energy==75,"original defaults");
+    Check(pet.State.scale==.7&&pet.State.mood==80&&pet.State.energy==75,"default size and original meter defaults");
+    pet.SetScale(1,false);
     pet.UpdateCursor("character");IntPtr grabHandle=pet.Cursor.Handle;
     Check(grabHandle!=IntPtr.Zero&&grabHandle!=Cursors.SizeAll.Handle&&grabHandle!=Cursors.Hand.Handle,"character hover uses grab hand instead of move arrows or link pointer");
     using(Bitmap cursor=HandCursors.Bitmap(false))cursor.Save(Path.Combine(folder,"cursor-grab.png"));
@@ -49,7 +64,7 @@ internal static class Checks {
     Check((Native.GetWindowLong(pet.Handle,-20)&0x80)!=0&&(Native.GetWindowLong(pet.Handle,-20)&0x40000)==0,"companion is a tool window without taskbar application style");
     using(RoundedMenu popup=pet.CreateMenu()) {
      Check(!popup.Region.IsVisible(0,0)&&popup.Region.IsVisible(popup.Width/2,popup.Height/2),"context menu has rounded window corners");
-     Check(popup.Items.Count==9&&popup.Items[0].Text=="显示辉夜"&&popup.Items[4].Name=="panel-enabled"&&popup.Items[5].Text=="回到屏幕右下角"&&popup.Items[6] is ToolStripSeparator&&popup.Items[8].Text=="退出辉夜","context menu adds panel switch and preserves existing action ordering and separator");
+     Check(popup.Items.Count==11&&popup.Items[0].Text=="显示辉夜"&&popup.Items[4].Name=="panel-enabled"&&popup.Items[5].Name=="water-toggle"&&popup.Items[6].Name=="water-interval"&&popup.Items[7].Text=="回到屏幕右下角"&&popup.Items[8] is ToolStripSeparator&&popup.Items[10].Text=="退出辉夜","context menu adds panel switch and preserves existing action ordering and separator");
      Check(((ToolStripMenuItem)popup.Items["panel-enabled"]).Checked,"menu panel toggle reflects enabled state");
      Point menuAnchor=new Point(600,500);IntPtr foreground=Native.GetForegroundWindow();
      popup.ShowAnchored(pet,menuAnchor);Application.DoEvents();
@@ -58,8 +73,25 @@ internal static class Checks {
      Check((Native.GetWindowLong(popup.Handle,-20)&0x80)!=0&&(Native.GetWindowLong(popup.Handle,-20)&0x40000)==0,"context menu is a tool window without taskbar application style");
      Check(TaskbarCandidates()==0,"opening context menu creates no visible taskbar-eligible application window");
      using(Bitmap preview=new Bitmap(popup.Width,popup.Height)){popup.DrawToBitmap(preview,new Rectangle(Point.Empty,popup.Size));for(int y=0;y<preview.Height;y++)for(int x=0;x<preview.Width;x++)if(!popup.Region.IsVisible(x,y))preview.SetPixel(x,y,Color.Transparent);preview.Save(Path.Combine(folder,"context-menu.png"));}
-     popup.Close();
-     double menuEnergy=pet.State.energy;popup.Items[1].PerformClick();Check(pet.State.energy==Math.Min(100,menuEnergy+20),"restyled menu still dispatches feeding action");pet.State.energy=75;pet.State.mood=80;
+     double menuEnergy=pet.State.energy,menuMood=pet.State.mood;Point savedMouse=Cursor.Position;
+     foreach(string toggleName in new string[]{"topmost","panel-enabled","water-toggle"}) {
+      ToolStripMenuItem toggle=(ToolStripMenuItem)popup.Items[toggleName];bool initialToggle=toggle.Checked;
+      for(int click=0;click<2;click++) {
+       Rectangle bounds=toggle.Bounds;Cursor.Position=popup.PointToScreen(new Point(bounds.Right-(int)(17*pet.Dpi),bounds.Top+bounds.Height/2));
+       Native.mouse_event(2,0,0,0,UIntPtr.Zero);Native.mouse_event(4,0,0,0,UIntPtr.Zero);Application.DoEvents();
+       bool actual=toggleName=="topmost"?pet.State.topmost:toggleName=="panel-enabled"?pet.State.panelEnabled:pet.State.waterEnabled;
+       Check(popup.Visible&&toggle.Checked==actual&&actual==(click==0?!initialToggle:initialToggle),"real switch click keeps menu open and refreshes state "+toggleName+" click "+click);
+      }
+     }
+     Rectangle teaItem=popup.Items["feed"].Bounds;
+     Cursor.Position=popup.PointToScreen(new Point(teaItem.Left+teaItem.Width/2,teaItem.Top+teaItem.Height/2));
+     Native.mouse_event(2,0,0,0,UIntPtr.Zero);Native.mouse_event(4,0,0,0,UIntPtr.Zero);Application.DoEvents();Cursor.Position=savedMouse;
+     Check(!popup.Visible&&pet.State.energy==Math.Min(100,menuEnergy+20)&&pet.State.mood==Math.Min(100,menuMood+5),"real menu tea click closes menu and updates meters");
+     Check(pet.Frame=="tea"&&pet.Bubble=="茶已经泡好了。要一起喝吗？","menu tea click plays tea pose and dialogue");
+     pet.State.energy=100;pet.State.mood=100;pet.SetFrame("idle");pet.Bubble="";popup.Items["feed"].PerformClick();
+     Check(pet.Frame=="tea"&&pet.Bubble.Length>0,"menu tea still reacts when meters are full");
+     pet.Hide();popup.Items["feed"].PerformClick();Check(pet.Visible&&pet.Frame=="tea","tray tea action reveals hidden companion");
+     pet.State.energy=75;pet.State.mood=80;
     }
     Rectangle work=Screen.PrimaryScreen.WorkingArea;
     Point clipped=RoundedMenu.AnchoredLocation(new Point(work.Right-1,work.Top+1),new Size(192,333),work);
@@ -148,7 +180,7 @@ internal static class Checks {
     wait.Restart();while(wait.ElapsedMilliseconds<3400)Application.DoEvents();
     foreach(double scale in new double[]{.5,.6,.73,.8,1,1.2}) {
      pet.State.scale=scale;
-     foreach(string frame in new string[]{"idle","happy","tea","sleep"}) {
+     foreach(string frame in new string[]{"idle","happy","tea","sleep","water-offer"}) {
       pet.Frame=frame;pet.State.sleeping=frame=="sleep";
       using(Bitmap rendered=pet.RenderBitmap()) {
        foreach(PointF logical in new PointF[]{new PointF(46,500),new PointF(334,500),new PointF(190,380)}) {
@@ -172,10 +204,10 @@ internal static class Checks {
     pet.Pat();Check(pet.State.mood==93&&pet.Frame=="happy","pat +8 mood and happy frame");
     pet.Sleep(true);Check(pet.State.sleeping&&pet.Frame=="sleep","sleep frame");
     double energy=pet.State.energy,mood=pet.State.mood;pet.Feed(true);pet.Pat();Check(pet.State.energy==energy&&pet.State.mood==mood&&pet.Frame=="sleep","sleep blocks feeding and pat");
-    pet.AdvanceMeters();Check(pet.State.energy==energy-1&&pet.State.mood==mood+1,"30-second energy and sleep mood rule");
+    pet.AdvanceMeters();Check(pet.State.energy==energy-1&&pet.State.mood==mood+1,"resting meter recovery and energy decay step");
     pet.Sleep(true);Check(!pet.State.sleeping&&pet.Frame=="idle","wake returns idle");
     energy=pet.State.energy;mood=pet.State.mood;pet.AdvanceMeters();
-    Check(pet.State.energy==energy-1&&pet.State.mood==mood-1,"awake mood and energy both decrease by one every 30 seconds");
+    Check(pet.State.energy==energy-1&&pet.State.mood==mood-1,"awake meter decay step");
     pet.State.energy=0;pet.State.mood=0;pet.AdvanceMeters();
     Check(pet.State.energy==0&&pet.State.mood==0,"natural decay clamps both meters at zero");
     pet.Sleep(false);pet.State.mood=100;pet.AdvanceMeters();
@@ -183,9 +215,9 @@ internal static class Checks {
     pet.Sleep(false);
     pet.State.energy=99;pet.State.mood=99;pet.Feed(true);pet.Pat();Check(pet.State.energy==100&&pet.State.mood==100,"meters clamp to 100");
     bool top=pet.State.topmost;pet.ActivateTarget("topmost");Check(pet.TopMost!=top&&pet.State.topmost!=top,"topmost toggle");
-    foreach(string id in new string[]{"size-slider","size-reset"}) {
+    foreach(string id in new string[]{"size-slider"}) {
      RectangleF button=pet.Rect(id);
-     Check(pet.Target(new Point((int)((button.X+button.Width/2)*pet.Dpi),(int)((button.Y+button.Height/2)*pet.Dpi)))==id,"slider and reset hit target "+id);
+     Check(pet.Target(new Point((int)((button.X+button.Width/2)*pet.Dpi),(int)((button.Y+button.Height/2)*pet.Dpi)))==id,"slider hit target "+id);
     }
     RectangleF slider=pet.Rect("size-slider");Point anchored=pet.Location;
     Point sliderLeft=new Point((int)Math.Round((slider.Left+6)*pet.Dpi),(int)Math.Round((slider.Top+slider.Height/2)*pet.Dpi));
@@ -196,7 +228,7 @@ internal static class Checks {
     Check(pet.State.scale==1.2&&pet.PanelOpen&&pet.Location==anchored&&pet.Rect("size-slider")==slider,"slider dragging clamps to 120 percent and keeps panel fixed");
     Native.SendMessage(pet.Handle,0x202,IntPtr.Zero,pack(sliderRight));
     Check(!pet.Capture&&!pet.Dragging&&pet.State.scale==1.2,"slider release outside control ends capture");
-    pet.SetScale(.73,false);pet.ActivateTarget("size-reset");Check(pet.State.scale==1,"reset restores 100 percent");
+    pet.SetScale(1,false);
     pet.SetScale(.73,false);
     using(Bitmap panel=pet.PanelBitmap())panel.Save(Path.Combine(folder,"panel-size-slider.png"));
     double frozenDelta=pet.PanelDelta;pet.SetScale(.5,false);pet.TogglePanel();
@@ -226,7 +258,7 @@ internal static class Checks {
        Check(bubble.Right+pet.Left/pet.Dpi<=Screen.PrimaryScreen.WorkingArea.Right/pet.Dpi-3.9,"speech bubble stays inside right screen edge, scale "+bubbleScale);
        string originalBubble=pet.Bubble;
        pet.Bubble="辉夜";RectangleF singleLine=pet.BubbleBounds(graphics);
-       foreach(string shortSentence in new string[]{"能多陪你一会儿也不是不可以。","能陪你一会……也不是不可以"}) {
+       foreach(string shortSentence in new string[]{"能多陪你一会儿也不是不可以","能陪你一会……也不是不可以"}) {
         pet.Bubble=shortSentence;RectangleF shortBounds=pet.BubbleBounds(graphics);
         Check(Math.Abs(shortBounds.Left+shortBounds.Width/2-bodyCenter)<.01&&Math.Abs(shortBounds.Bottom-singleLine.Bottom)<.01,"short sentences preserve shared axis and bottom even when wrapping at scale "+bubbleScale+": "+shortSentence);
         Check(shortBounds.Right+pet.Left/pet.Dpi<=Screen.PrimaryScreen.WorkingArea.Right/pet.Dpi-3.9,"short sentence stays inside right edge at scale "+bubbleScale);
@@ -253,6 +285,73 @@ internal static class Checks {
    }
   }catch(Exception e){error=e.ToString();Environment.ExitCode=1;}
   File.WriteAllText(Path.Combine(folder,"self-test.json"),new JavaScriptSerializer().Serialize(new{success=success,error=error,checks=checks}));
+ }
+ static void CheckWaterReminder(string folder) {
+  using(Pet pet=new Pet(true)) {
+   pet.Show();Application.DoEvents();pet.Bubble="";
+   pet.SetWaterReminder(true,1);double due=pet.NextWaterAt;
+   Check(due>=pet.Now+59&&due<=pet.Now+61,"enabling water reminders starts a full interval");
+   pet.AdvanceWaterReminder(due-.01);Check(pet.Frame=="idle","water reminder never fires early");
+   pet.Sleep(false);pet.Hide();pet.AdvanceWaterReminder(due);Check(pet.Visible&&pet.Bubble=="记得喝水哦……才不是特意提醒你的"&&pet.Frame=="water-offer"&&pet.NextWaterAt==due+60,"hidden pet reappears and immediately offers the glass");
+   pet.AdvanceWaterReminder(due+4);Check(pet.Frame=="sleep","hidden pet restores its pre-reminder appearance and stays visible");
+   pet.SetWaterReminder(true,1);pet.Bubble="";due=pet.NextWaterAt;
+   pet.AdvanceWaterReminder(due);Check(pet.Frame=="water-offer"&&pet.Bubble=="记得喝水哦……才不是特意提醒你的"&&pet.NextWaterAt==due+60,"resting pet immediately offers the glass");
+   pet.AdvanceWaterReminder(due+4);Check(pet.Frame=="sleep","water offer returns to sleep after four seconds");
+   pet.Sleep(false);pet.Bubble="";double energy=pet.State.energy,mood=pet.State.mood;
+   due=pet.NextWaterAt;
+   pet.AdvanceWaterReminder(due+1000);
+   Check(pet.Bubble=="记得喝水哦……才不是特意提醒你的"&&pet.Frame=="water-offer"&&pet.NextWaterAt==due+1060,"missed water intervals produce one glass offer and restart the interval from delivery");
+   Check(pet.State.energy==energy&&pet.State.mood==mood,"water reminder does not change pet meters");
+   using(Bitmap b=pet.RenderBitmap())b.Save(Path.Combine(folder,"water-offer.png"));
+   pet.AdvanceWaterReminder(due+1001.5);Check(pet.Frame=="water-offer","water reminder remains a single glass-offer pose");
+   pet.AdvanceWaterReminder(due+1004);Check(pet.Frame=="idle","water offer returns to idle after four seconds");
+   pet.SetWaterReminder(false,1);pet.Bubble="";pet.AdvanceWaterReminder(due+2000);Check(pet.Frame=="idle"&&pet.Bubble=="","disabled water reminder never fires");
+   pet.SetWaterReminder(true,1);due=pet.NextWaterAt;pet.Bubble="";pet.AdvanceWaterReminder(due);pet.Pat();pet.AdvanceWaterReminder(due+2);
+   Check(pet.Frame=="happy","manual interaction cancels the active water pose sequence");
+   pet.SetWaterReminder(false,30);
+   using(RoundedMenu settingsMenu=pet.CreateMenu()) {
+    Check(!pet.PanelOpen,"water settings are available with panel closed");
+    settingsMenu.Items["water-toggle"].PerformClick();Check(pet.State.waterEnabled,"tray menu enables water reminders");
+    settingsMenu.Items["water-toggle"].PerformClick();Check(!pet.State.waterEnabled,"tray menu disables water reminders");
+    WaterIntervalItem field=(WaterIntervalItem)settingsMenu.Items["water-interval"];
+    settingsMenu.ShowAnchored(pet,new Point(600,500));Application.DoEvents();
+    Check(pet.OwnedForms.Length==0&&field.Input.Visible&&field.Input.Text=="30","tray interval is editable in menu without a dialog");
+    TextBox input=field.Input;Point savedCursor=Cursor.Position;Cursor.Position=input.PointToScreen(new Point(input.Width/2,input.Height/2));
+    Native.mouse_event(2,0,0,0,UIntPtr.Zero);Native.mouse_event(4,0,0,0,UIntPtr.Zero);
+    Application.DoEvents();System.Threading.Thread.Sleep(100);Application.DoEvents();Cursor.Position=savedCursor;
+    Check(settingsMenu.Visible&&Native.GetForegroundWindow()==settingsMenu.Handle&&Native.GetFocus()==input.Handle,"inline menu input receives foreground keyboard focus and keeps menu open");
+    input.SelectAll();SendKeys.SendWait("45");Application.DoEvents();Check(input.Text=="45","real keyboard edits menu interval");
+    Check(TaskbarCandidates()==0,"inline menu input does not add a taskbar application");
+    Native.SendMessage(input.Handle,0x100,(IntPtr)Keys.Enter,IntPtr.Zero);Application.DoEvents();
+    Check(pet.State.waterMinutes==45&&!pet.State.waterEnabled&&!settingsMenu.Visible,"Enter saves inline interval and closes menu");
+    settingsMenu.ShowAnchored(pet,new Point(600,500));Application.DoEvents();input.Text="90";
+    Native.SendMessage(input.Handle,0x100,(IntPtr)Keys.Escape,IntPtr.Zero);Application.DoEvents();
+    Check(pet.State.waterMinutes==45&&!settingsMenu.Visible,"Escape discards inline interval edits");
+    settingsMenu.ShowAnchored(pet,new Point(600,500));Application.DoEvents();input.Text="0";
+    Native.SendMessage(input.Handle,0x100,(IntPtr)Keys.Enter,IntPtr.Zero);Application.DoEvents();
+    Check(pet.State.waterMinutes==45&&settingsMenu.Visible,"invalid inline interval keeps menu open without changing settings");
+    input.Text="60";settingsMenu.Close();Application.DoEvents();
+    Check(pet.State.waterMinutes==60,"closing menu saves a valid inline interval");
+    settingsMenu.ShowAnchored(pet,new Point(600,500));Application.DoEvents();input.Text="1441";settingsMenu.Close();Application.DoEvents();
+    Check(pet.State.waterMinutes==60&&input.Text=="60","closing menu discards invalid interval");
+    using(Form outside=new Form{ShowInTaskbar=false,StartPosition=FormStartPosition.Manual,Bounds=new Rectangle(40,40,180,100)}) {
+     int clicks=0;outside.MouseDown+=delegate{clicks++;};outside.Show();Application.DoEvents();
+     for(int cycle=0;cycle<3;cycle++) {
+      settingsMenu.ShowAnchored(pet,new Point(600,500));Application.DoEvents();
+      if(cycle>0){Cursor.Position=input.PointToScreen(new Point(input.Width/2,input.Height/2));Native.mouse_event(2,0,0,0,UIntPtr.Zero);Native.mouse_event(4,0,0,0,UIntPtr.Zero);Application.DoEvents();input.Text=cycle==1?"75":"0";}
+      Cursor.Position=outside.PointToScreen(new Point(30,30));Native.mouse_event(2,0,0,0,UIntPtr.Zero);Native.mouse_event(4,0,0,0,UIntPtr.Zero);
+      Stopwatch dismissal=Stopwatch.StartNew();while(dismissal.ElapsedMilliseconds<200)Application.DoEvents();
+      Check(!settingsMenu.Visible,"real outside click dismisses menu, edit cycle "+cycle);
+      Check(clicks==cycle+1,"outside click still reaches target window, cycle "+cycle);
+      Check(pet.State.waterMinutes==(cycle==0?60:75),"outside dismissal saves valid interval and rejects invalid interval, cycle "+cycle);
+     }
+     Cursor.Position=savedCursor;outside.Close();
+    }
+   }
+   pet.ShowMenu(new Point(600,500));
+   Check(((WaterIntervalItem)pet.ActiveMenu.Items["water-interval"]).Input.Text=="75"&&!((ToolStripMenuItem)pet.ActiveMenu.Items["water-toggle"]).Checked,"tray menu refreshes inline water settings after edits");pet.ActiveMenu.Close();
+   pet.TogglePanel();using(Bitmap b=pet.PanelBitmap())b.Save(Path.Combine(folder,"panel-without-water.png"));
+  }
  }
  static void CheckFrame(Bitmap b,float dpi) {if(b.GetPixel((int)(190*dpi),(int)(570*dpi)).A<100)throw new Exception("Empty character during action switch");}
  static int TaskbarCandidates() {

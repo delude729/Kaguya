@@ -12,3 +12,7 @@
 .vs/
 bin/
 obj/
+
+# 图片生成中间物
+/output/
+/tmp/imagegen/

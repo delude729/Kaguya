@@ -35,8 +35,10 @@ namespace KaguyaNative
     }
     internal sealed class State
     {
-        public double mood=80,energy=75,scale=1;
+        public double mood=80,energy=75,scale=.7;
         public bool sleeping=false,topmost=true,panelEnabled=true;
+        public bool waterEnabled=false;
+        public int waterMinutes=30;
         public double? x=null,y=null;
     }
     internal sealed class Geometry
@@ -90,6 +92,10 @@ namespace KaguyaNative
         double bubbleUntil,imageUntil,shyStart=-10,panelChanged=-10,panelFrom,panelTo,lastTick,lastSave=-1;
         bool pendingSave;
         double panelLayoutDelta;
+        double nextWaterAt,waterStarted=-1,waterPreviousImageUntil;
+        string waterPreviousFrame;
+
+        internal double NextWaterAt {get{return nextWaterAt;}}
         Bitmap cachedPanel;
         byte[] characterPixels;
         string cachedPanelKey="",lastScene="";
@@ -112,7 +118,7 @@ namespace KaguyaNative
             FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;StartPosition=FormStartPosition.Manual;
             AutoScaleMode=AutoScaleMode.None;ClientSize=new Size((int)Math.Round(380*Dpi),(int)Math.Round(726*Dpi));
             Text=Title;TopMost=State.topmost;KeyPreview=true;
-            foreach(string name in new string[]{"idle","happy","tea","sleep"}) LoadImage(name,Path.Combine("assets","kaguya",name+".png"));
+            foreach(string name in new string[]{"idle","happy","tea","sleep","water-offer"}) LoadImage(name,Path.Combine("assets","kaguya",name+".png"));
             for(int s=0;s<2;s++)for(int t=0;t<2;t++)for(int z=0;z<3;z++) {
                 string name="panel-"+s+"-"+t+"-"+z;LoadUiImage(name);
             }
@@ -120,9 +126,8 @@ namespace KaguyaNative
                 string name="badge-"+s+"-"+o;LoadUiImage(name);
             }
             Dictionary<string,object> source=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(root,"assets","ui","layout.json")));
-            foreach(string key in new string[]{"panel","close","feed","pat","sleep","topmost","hide","badge","character","mood","energy","mood-label","energy-label"}) layout[key]=ReadRect((Dictionary<string,object>)source[key]);
-            layout["size-slider"]=new RectangleF(97,353,96,27);
-            layout["size-reset"]=new RectangleF(230,353,35,27);
+            foreach(string key in new string[]{"panel","close","feed","pat","sleep","topmost","hide","badge","character","mood","energy","mood-label","energy-label","size-slider","size-value"}) layout[key]=ReadRect((Dictionary<string,object>)source[key]);
+            nextWaterAt=Now+State.waterMinutes*60;
             Frame=State.sleeping?"sleep":"idle";
             ResetPosition();
             if(!test) {
@@ -197,6 +202,7 @@ namespace KaguyaNative
                     if(!saved.ContainsKey("energy")&&saved.ContainsKey("milk"))s.energy=Convert.ToDouble(saved["milk"]);
                     State=s;State.mood=FiniteClamp(s.mood,80);State.energy=FiniteClamp(s.energy,75);
                     State.scale=NormalizeScale(s.scale);
+                    State.waterMinutes=Math.Max(1,Math.Min(1440,s.waterMinutes));
                 }
             }catch{}
             if(firstRun)State.topmost=true;
@@ -238,6 +244,7 @@ namespace KaguyaNative
         }
         internal void TogglePanel() {
             if(!State.panelEnabled)return;
+            
             if(!PanelOpen) {
                 panelLayoutDelta=SpriteDelta;
                 RectangleF r=Geometry.BoundarySprite(State.scale);Point c=new Point(Left+(int)((r.Left+r.Right)/2*Dpi),Top+(int)((r.Top+r.Bottom)/2*Dpi));
@@ -247,6 +254,7 @@ namespace KaguyaNative
             panelFrom=PanelAlpha;PanelOpen=!PanelOpen;panelTo=PanelOpen?1:0;panelChanged=Now;PaintFrame();
         }
         internal void TogglePanelEnabled() {
+            
             State.panelEnabled=!State.panelEnabled;
             if(!State.panelEnabled){PanelOpen=false;panelFrom=panelTo=0;panelChanged=Now;focus="character";}
             SaveState(true);PaintFrame();
@@ -256,7 +264,7 @@ namespace KaguyaNative
         internal string Target(Point p) {
             PointF q=new PointF(p.X/Dpi,p.Y/Dpi);
             if(PanelOpen&&Rect("panel").Contains(q)) {
-                foreach(string id in new string[]{"close","feed","pat","sleep","topmost","hide","size-slider","size-reset"})if(Rect(id).Contains(q))return id;
+                foreach(string id in new string[]{"close","feed","pat","sleep","topmost","hide","size-slider"})if(Rect(id).Contains(q))return id;
                 return "panel";
             }
             if(Rect("badge").Contains(q))return "badge";
@@ -277,6 +285,7 @@ namespace KaguyaNative
         }
         protected override void OnMouseDown(MouseEventArgs e) {
             base.OnMouseDown(e);
+            
             if(e.Button==MouseButtons.Right){if(Target(e.Location)=="")return;EndDrag();ShowMenu(PointToScreen(e.Location));return;}
             if(e.Button!=MouseButtons.Left)return;
             pressedTarget=Target(e.Location);if(pressedTarget=="")return;
@@ -324,11 +333,29 @@ namespace KaguyaNative
             else if(id=="topmost"){State.topmost=!State.topmost;TopMost=State.topmost;SaveState(true);}
             else if(id=="panel-enabled")TogglePanelEnabled();
             else if(id=="hide")Hide();
-            else if(id=="size-reset")SetScale(1,true);
+            else if(id=="water-toggle")SetWaterReminder(!State.waterEnabled,State.waterMinutes);
             PaintFrame();
         }
         internal void Say(string value){Bubble=value;bubbleUntil=Now+3.3;}
-        internal void SetFrame(string name){Frame=name;imageUntil=Now+3.2;}
+        internal void SetFrame(string name){waterStarted=-1;Frame=name;imageUntil=Now+3.2;}
+        internal bool SetWaterReminder(bool enabled,int minutes) {
+            if(minutes<1||minutes>1440)return false;
+            State.waterEnabled=enabled;State.waterMinutes=minutes;
+            nextWaterAt=Now+minutes*60;SaveState(true);PaintFrame();return true;
+        }
+        internal void AdvanceWaterReminder(double now) {
+            if(waterStarted>=0) {
+                if(now>=waterStarted+4){waterStarted=-1;Frame=waterPreviousFrame;imageUntil=waterPreviousImageUntil;waterPreviousFrame=null;}
+            }
+            if(!State.waterEnabled||now<nextWaterAt||Dragging||pressed||
+                (menu!=null&&menu.Visible)||(Bubble.Length>0&&now<bubbleUntil))return;
+            // Deliver at most once after a pause; missed intervals never form a backlog.
+            if(!Visible)Show();
+            nextWaterAt=now+State.waterMinutes*60;
+            waterPreviousFrame=Frame;waterPreviousImageUntil=imageUntil;
+            waterStarted=now;Frame="water-offer";imageUntil=now+4;shyStart=-10;
+            Say("记得喝水哦……才不是特意提醒你的");bubbleUntil=Now+4;
+        }
         internal void Pat() {
             if(State.sleeping){Say("嘘，辉夜正在休息……☾");return;}
             State.mood=Math.Min(100,State.mood+8);SetFrame("happy");shyStart=Now;
@@ -340,6 +367,7 @@ namespace KaguyaNative
             if(visual){SetFrame("tea");Say("茶已经泡好了。要一起喝吗？");}SaveState(false);
         }
         internal void Sleep(bool visual) {
+            waterStarted=-1;
             State.sleeping=!State.sleeping;Frame=State.sleeping?"sleep":"idle";imageUntil=0;
             if(visual)Say(State.sleeping?"稍微休息一下……一会儿见":"我醒了。你一直在这里吗？");SaveState(false);
         }
@@ -350,18 +378,21 @@ namespace KaguyaNative
         }
         void TickFrame() {
             double now=Now;if(pendingSave&&now-lastSave>=.25)SaveState(false);
-            if(now-meterClock>=30){meterClock=now;AdvanceMeters();}
+            if(now-meterClock>=300){meterClock=now;AdvanceMeters();}
+            AdvanceWaterReminder(now);
             if(!State.sleeping&&imageUntil>0&&now>=imageUntil){Frame="idle";imageUntil=0;}
             // Hidden pets keep their timers/state without rendering invisible frames.
             if(Visible&&(menu==null||!menu.Visible))PaintFrame();lastTick=now;
         }
         void ShowPet(){Show();PaintFrame();}
         internal void ShowMenu(Point p) {
+            
             if(menu==null)menu=CreateMenu();
             menu.Items["feed"].Enabled=!State.sleeping;
             menu.Items["sleep"].Text=State.sleeping?"叫醒辉夜":"休息一会";
             ((ToolStripMenuItem)menu.Items["topmost"]).Checked=State.topmost;
             ((ToolStripMenuItem)menu.Items["panel-enabled"]).Checked=State.panelEnabled;
+            ((ToolStripMenuItem)menu.Items["water-toggle"]).Checked=State.waterEnabled;
             ((RoundedMenu)menu).ShowAnchored(this,p);
         }
         internal RoundedMenu ActiveMenu {get{return menu as RoundedMenu;}}
@@ -369,10 +400,12 @@ namespace KaguyaNative
             RoundedMenu result=new RoundedMenu(Dpi);
             result.PopupOwner=Handle;
             result.Items.Add("显示辉夜",null,delegate{ShowPet();});
-            ToolStripItem feed=result.Items.Add("一起喝茶",null,delegate{Feed(false);PaintFrame();});feed.Name="feed";feed.Enabled=!State.sleeping;
+            ToolStripItem feed=result.Items.Add("一起喝茶",null,delegate{ShowPet();ActivateTarget("feed");});feed.Name="feed";feed.Enabled=!State.sleeping;
             result.Items.Add(State.sleeping?"叫醒辉夜":"休息一会",null,delegate{Sleep(false);PaintFrame();}).Name="sleep";
-            ToolStripMenuItem top=new ToolStripMenuItem("始终置顶",null,delegate{ActivateTarget("topmost");});top.Checked=State.topmost;top.Name="topmost";top.Tag="toggle";result.Items.Add(top);
-            ToolStripMenuItem panel=new ToolStripMenuItem("启用面板",null,delegate{ActivateTarget("panel-enabled");});panel.Checked=State.panelEnabled;panel.Name="panel-enabled";panel.Tag="toggle";result.Items.Add(panel);
+            ToolStripMenuItem top=new ToolStripMenuItem("始终置顶",null,delegate{ActivateTarget("topmost");});top.Checked=State.topmost;top.Name="topmost";top.Tag="toggle";top.CheckOnClick=true;result.Items.Add(top);
+            ToolStripMenuItem panel=new ToolStripMenuItem("启用面板",null,delegate{ActivateTarget("panel-enabled");});panel.Checked=State.panelEnabled;panel.Name="panel-enabled";panel.Tag="toggle";panel.CheckOnClick=true;result.Items.Add(panel);
+            ToolStripMenuItem water=new ToolStripMenuItem("喝水提醒",null,delegate{SetWaterReminder(!State.waterEnabled,State.waterMinutes);});water.Checked=State.waterEnabled;water.Name="water-toggle";water.Tag="toggle";water.CheckOnClick=true;result.Items.Add(water);
+            result.Items.Add(new WaterIntervalItem(Dpi,delegate{return State.waterMinutes;},delegate(int minutes){return SetWaterReminder(State.waterEnabled,minutes);}));
             result.Items.Add("回到屏幕右下角",null,delegate{ResetPosition();PaintFrame();});result.Items.Add(new ToolStripSeparator());
             result.Items.Add("暂时隐藏",null,delegate{Hide();});result.Items.Add("退出辉夜",null,delegate{Close();});result.Prepare();return result;
         }
@@ -380,7 +413,7 @@ namespace KaguyaNative
             base.OnKeyDown(e);
             if(e.KeyCode==Keys.Escape&&PanelOpen){TogglePanel();e.Handled=true;return;}
             if(e.KeyCode==Keys.Tab) {
-                string[] order=PanelOpen?new string[]{"close","feed","pat","sleep","topmost","size-slider","size-reset","hide","character","badge"}:State.panelEnabled?new string[]{"character","badge"}:new string[]{"character"};
+                string[] order=PanelOpen?new string[]{"close","feed","pat","sleep","topmost","size-slider","hide","character","badge"}:State.panelEnabled?new string[]{"character","badge"}:new string[]{"character"};
                 int i=Array.IndexOf(order,focus);focus=order[(i+(e.Shift?order.Length-1:1))%order.Length];PaintFrame();e.Handled=true;
             }
             if(PanelOpen&&focus=="size-slider") {
@@ -469,7 +502,6 @@ namespace KaguyaNative
             using(Graphics g=Graphics.FromImage(b)) {
                 g.DrawImageUnscaled(original,0,0);g.ScaleTransform(Dpi,Dpi);g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=TextRenderingHint.ClearTypeGridFit;
                 // Render the slider at final DPI and cache it with the current percentage.
-                using(Brush background=new SolidBrush(C("#fffafb")))g.FillRectangle(background,new RectangleF(94,351,174,31));
                 RectangleF slider=layout["size-slider"];
                 float trackX=slider.Left+6,trackWidth=slider.Width-12,trackY=slider.Top+slider.Height/2-2;
                 float amount=(float)((State.scale-.5)/.7),knobX=trackX+trackWidth*amount;
@@ -477,8 +509,7 @@ namespace KaguyaNative
                 if(amount>0)FillRound(g,new RectangleF(trackX,trackY,trackWidth*amount,4),2,C("#ce9aab"));
                 using(Brush brush=new SolidBrush(C("#b86981")))g.FillEllipse(brush,knobX-5,trackY-3,10,10);
                 if(focus=="size-slider")using(Pen outline=new Pen(C("#ead9e2")))g.DrawEllipse(outline,knobX-7,trackY-5,14,14);
-                TextAt(g,Math.Round(State.scale*100).ToString("0")+"%",10,C("#a36f84"),new RectangleF(193,353,37,27),StringAlignment.Center);
-                TextAt(g,"重置",10,C("#aa8798"),layout["size-reset"],StringAlignment.Center);
+                TextAt(g,Math.Round(State.scale*100).ToString("0")+"%",10,C("#a36f84"),layout["size-value"],StringAlignment.Center);
                 foreach(string id in new string[]{"mood","energy"}) {RectangleF r=layout[id];FillRound(g,r,3,C("#eee5ea"));double value=id=="mood"?State.mood:State.energy;if(value>0)FillRound(g,new RectangleF(r.X,r.Y,(float)(r.Width*value/100),r.Height),3,C(id=="mood"?"#ce9aab":"#b3a9c9"));}
                 RectangleF mood=layout["mood-label"];mood.X=100;mood.Width=81;
                 TextAt(g,State.mood>60?"愉快":State.mood>30?"想见你":"想被关心",11,C("#b48e9a"),mood,StringAlignment.Far);

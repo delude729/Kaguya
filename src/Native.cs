@@ -23,6 +23,9 @@ namespace KaguyaNative {
         [DllImport("user32.dll")] internal static extern bool IsWindowVisible(IntPtr h);
         [DllImport("user32.dll")] internal static extern bool IsIconic(IntPtr h);
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr window);
+        [DllImport("user32.dll")] internal static extern IntPtr GetFocus();
+        [DllImport("user32.dll")] internal static extern void mouse_event(uint flags,uint dx,uint dy,uint data,UIntPtr extra);
         [DllImport("user32.dll")] internal static extern IntPtr WindowFromPoint(Point point);
         [DllImport("user32.dll")] internal static extern IntPtr GetWindow(IntPtr window,uint command);
         internal delegate bool WindowVisitor(IntPtr window,IntPtr argument);
@@ -32,6 +35,12 @@ namespace KaguyaNative {
         [DllImport("dwmapi.dll",EntryPoint="DwmGetWindowAttribute")] internal static extern int DwmInt(IntPtr h,int attr,out int value,int size);
         [DllImport("user32.dll")] internal static extern bool GetWindowRect(IntPtr h,out Rect r);
         [DllImport("user32.dll")] internal static extern int GetWindowLong(IntPtr h,int index);
+        [DllImport("user32.dll")] internal static extern int SetWindowLong(IntPtr h,int index,int value);
+        internal delegate IntPtr MouseHook(int code,IntPtr message,IntPtr data);
+        [DllImport("user32.dll",SetLastError=true)] internal static extern IntPtr SetWindowsHookEx(int kind,MouseHook callback,IntPtr module,uint thread);
+        [DllImport("user32.dll")] internal static extern bool UnhookWindowsHookEx(IntPtr hook);
+        [DllImport("user32.dll")] internal static extern IntPtr CallNextHookEx(IntPtr hook,int code,IntPtr message,IntPtr data);
+        [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] internal static extern IntPtr GetModuleHandle(string name);
         [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(IntPtr h,out uint id);
         [DllImport("user32.dll")] internal static extern IntPtr GetDC(IntPtr h);
         [DllImport("user32.dll")] internal static extern int ReleaseDC(IntPtr h,IntPtr dc);

@@ -3,11 +3,11 @@
 <body><main>
   <section id="panel" class="panel hit closed" inert>
     <header><div><span class="eyebrow">KAGUYA · LITTLE COMPANION</span><h1>辉夜的茶会 <span>✧</span></h1></div><button id="close" class="icon" title="收起面板" aria-label="收起面板">−</button></header>
-    <p class="intro">一点小小的陪伴，只留给你。</p>
+    <p class="intro">一点小小的陪伴，只留给你</p>
     <div class="meters"><div><span>心情 <b id="mood-label">愉快</b></span><progress id="mood" aria-label="心情" max="100" value="80"></progress></div><div><span>元气 <b id="energy-label">75%</b></span><progress id="energy" aria-label="元气" max="100" value="75"></progress></div></div>
     <div class="actions"><button id="feed"><i>♧</i>一起喝茶</button><button id="pat"><i>♡</i>摸摸头</button><button id="sleep"><i>☾</i><span>休息一会</span></button></div>
     <div class="settings"><button id="topmost">始终置顶 <span>开</span></button><span class="still-note">安静地，陪着你</span></div>
-    <footer><span>角色大小</span><div class="sizes"><button data-scale="0.8">小</button><button data-scale="1" class="selected">中</button><button data-scale="1.2">大</button></div><button id="hide" title="隐藏后可点击系统托盘找回">暂时隐藏</button></footer>
+    <footer><span>角色大小</span><div id="size-slider"></div><span id="size-value">70%</span><button id="hide" title="隐藏后可点击系统托盘找回">暂时隐藏</button></footer>
   </section>
   <div id="bubble" role="status">今天，就让我在这里陪你吧</div>
   <div id="character" class="hit" title="拖动搬家 · 单击摸摸 · 右键菜单" tabindex="0" role="button" aria-label="辉夜，按回车或空格摸摸"><div id="avatar"><span id="zzz">z Z</span><img id="pet-image" src="assets/kaguya/idle.png" draggable="false" alt="Q版四宫辉夜"></div><div class="shadow"></div></div>
