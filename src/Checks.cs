@@ -33,8 +33,9 @@ internal static class Checks {
    Check(migrated.Contains("\"energy\":37")&&!migrated.Contains("\"milk\""),"new saves contain only the energy key");
    File.WriteAllText(Path.Combine(settings,"pet-state.json"),"{\"energy\":29,\"milk\":91}");
    using(Pet current=new Pet(true,settings))Check(current.State.energy==29,"current energy key takes precedence over legacy key");
-   using(Pet smaller=new Pet(true,settings))smaller.ActivateTarget("scale3");
-   using(Pet reloaded=new Pet(true,settings))Check(reloaded.State.scale==.6,"extra-small size survives save and reload");
+   using(Pet smaller=new Pet(true,settings))smaller.SetScale(.73,true);
+   using(Pet reloaded=new Pet(true,settings))Check(reloaded.State.scale==.73,"custom 73 percent size survives save and reload");
+   Check(Pet.NormalizeScale(double.NaN)==1&&Pet.NormalizeScale(double.PositiveInfinity)==1&&Pet.NormalizeScale(.1)==.5&&Pet.NormalizeScale(2)==1.2,"invalid scale fallback and slider range limits");
    Directory.Delete(settings,true);
    using(Pet pet=new Pet(true)) {
     pet.Show();Application.DoEvents();
@@ -145,7 +146,7 @@ internal static class Checks {
     pet.TogglePanel();
     // Let the panel and speech bubble disappear before inspecting blank pixels.
     wait.Restart();while(wait.ElapsedMilliseconds<3400)Application.DoEvents();
-    foreach(double scale in new double[]{.6,.8,1,1.2}) {
+    foreach(double scale in new double[]{.5,.6,.73,.8,1,1.2}) {
      pet.State.scale=scale;
      foreach(string frame in new string[]{"idle","happy","tea","sleep"}) {
       pet.Frame=frame;pet.State.sleeping=frame=="sleep";
@@ -156,7 +157,7 @@ internal static class Checks {
         Point screen=pet.PointToScreen(pixel);
         Check(Native.SendMessage(pet.Handle,0x84,IntPtr.Zero,pack(screen)).ToInt32()==-1,"blank pixel rejects native hit test at scale "+scale+" frame "+frame+" point "+logical);
        }
-       Point body=new Point((int)(190*pet.Dpi),(int)(570*pet.Dpi));
+       Point body=new Point((int)(190*pet.Dpi),(int)(600*pet.Dpi));
        Check(rendered.GetPixel(body.X,body.Y).A>100&&pet.Target(body)=="character","visible body stays interactive at scale "+scale+" frame "+frame);
       }
      }
@@ -182,13 +183,22 @@ internal static class Checks {
     pet.Sleep(false);
     pet.State.energy=99;pet.State.mood=99;pet.Feed(true);pet.Pat();Check(pet.State.energy==100&&pet.State.mood==100,"meters clamp to 100");
     bool top=pet.State.topmost;pet.ActivateTarget("topmost");Check(pet.TopMost!=top&&pet.State.topmost!=top,"topmost toggle");
-    pet.ActivateTarget("scale0");Check(pet.State.scale==.8,"small size");pet.ActivateTarget("scale1");Check(pet.State.scale==1,"medium size");pet.ActivateTarget("scale2");Check(pet.State.scale==1.2,"large size");
-    pet.ActivateTarget("scale3");Check(pet.State.scale==.6,"extra-small size");
-    foreach(string id in new string[]{"scale3","scale0","scale1","scale2"}) {
+    foreach(string id in new string[]{"size-slider","size-reset"}) {
      RectangleF button=pet.Rect(id);
-     Check(pet.Target(new Point((int)((button.X+button.Width/2)*pet.Dpi),(int)((button.Y+button.Height/2)*pet.Dpi)))==id,"four-size selector hit target "+id);
+     Check(pet.Target(new Point((int)((button.X+button.Width/2)*pet.Dpi),(int)((button.Y+button.Height/2)*pet.Dpi)))==id,"slider and reset hit target "+id);
     }
-    using(Bitmap panel=pet.PanelBitmap())panel.Save(Path.Combine(folder,"panel-four-sizes.png"));
+    RectangleF slider=pet.Rect("size-slider");Point anchored=pet.Location;
+    Point sliderLeft=new Point((int)Math.Round((slider.Left+6)*pet.Dpi),(int)Math.Round((slider.Top+slider.Height/2)*pet.Dpi));
+    Native.SendMessage(pet.Handle,0x201,(IntPtr)1,pack(sliderLeft));
+    Check(pet.State.scale==.5&&pet.Capture&&!pet.Dragging,"slider press previews 50 percent and captures mouse without moving pet");
+    Point sliderRight=new Point((int)Math.Round((slider.Right+40)*pet.Dpi),sliderLeft.Y);
+    Native.SendMessage(pet.Handle,0x200,(IntPtr)1,pack(sliderRight));
+    Check(pet.State.scale==1.2&&pet.PanelOpen&&pet.Location==anchored&&pet.Rect("size-slider")==slider,"slider dragging clamps to 120 percent and keeps panel fixed");
+    Native.SendMessage(pet.Handle,0x202,IntPtr.Zero,pack(sliderRight));
+    Check(!pet.Capture&&!pet.Dragging&&pet.State.scale==1.2,"slider release outside control ends capture");
+    pet.SetScale(.73,false);pet.ActivateTarget("size-reset");Check(pet.State.scale==1,"reset restores 100 percent");
+    pet.SetScale(.73,false);
+    using(Bitmap panel=pet.PanelBitmap())panel.Save(Path.Combine(folder,"panel-size-slider.png"));
     pet.State.scale=1;pet.Location=pet.ClampLocation(new Point(500,-200),null);Point down=new Point(pet.Left+(int)(180*pet.Dpi),pet.Top+(int)(520*pet.Dpi));pet.TestPress(down);
     Check(pet.Cursor.Handle!=grabHandle&&!pet.Dragging,"press immediately uses grabbing cursor before crossing the drag threshold, matching CSS active");
     pet.MoveGesture(new Point(down.X+(int)(4*pet.Dpi),down.Y));Check(!pet.Dragging,"4px remains click");
@@ -201,6 +211,32 @@ internal static class Checks {
     pet.EndDrag();Check(!pet.Dragging,"release ends drag");
     pet.Hide();Check(!pet.Visible,"hide");pet.Show();Check(pet.Visible,"show restores");
     pet.State.scale=1;pet.ResetPosition();Check(!pet.PanelOpen,"reset collapses panel");
+    foreach(double bubbleScale in new double[]{.5,.73,1.2}) {
+     pet.State.scale=bubbleScale;pet.ResetPosition();pet.Say("今天也很努力呢，先喝杯茶，再稍微休息一下吧");
+     using(Bitmap preview=pet.RenderBitmap()) {
+      using(Graphics graphics=Graphics.FromImage(preview)) {
+       graphics.ScaleTransform(pet.Dpi,pet.Dpi);
+       RectangleF bubble=pet.BubbleBounds(graphics),badgeBounds=pet.Rect("badge");
+       double bodyCenter=Geometry.Center(bubbleScale)+(214-256)*Math.Min(220*bubbleScale/512,245*bubbleScale/576);
+       Check(Math.Abs(bubble.Left+bubble.Width/2-bodyCenter)<.01&&Math.Abs(bubble.Left+bubble.Width/2-(badgeBounds.Left+badgeBounds.Width/2))<.01,"speech bubble, character body and badge share one axis at right edge, scale "+bubbleScale);
+       Check(bubble.Right+pet.Left/pet.Dpi<=Screen.PrimaryScreen.WorkingArea.Right/pet.Dpi-3.9,"speech bubble stays inside right screen edge, scale "+bubbleScale);
+       string originalBubble=pet.Bubble;
+       pet.Bubble="辉夜";RectangleF singleLine=pet.BubbleBounds(graphics);
+       foreach(string shortSentence in new string[]{"能多陪你一会儿也不是不可以。","能陪你一会……也不是不可以"}) {
+        pet.Bubble=shortSentence;RectangleF shortBounds=pet.BubbleBounds(graphics);
+        Check(Math.Abs(shortBounds.Left+shortBounds.Width/2-bodyCenter)<.01&&Math.Abs(shortBounds.Bottom-singleLine.Bottom)<.01,"short sentences preserve shared axis and bottom even when wrapping at scale "+bubbleScale+": "+shortSentence);
+        Check(shortBounds.Right+pet.Left/pet.Dpi<=Screen.PrimaryScreen.WorkingArea.Right/pet.Dpi-3.9,"short sentence stays inside right edge at scale "+bubbleScale);
+       }
+       if(bubbleScale==.5)Check(bubble.Height>singleLine.Height,"speech wraps when centered width is insufficient");
+       pet.Bubble="辉夜\n辉夜";RectangleF twoLines=pet.BubbleBounds(graphics);
+       pet.Bubble="辉夜\n辉夜\n辉夜";RectangleF threeLines=pet.BubbleBounds(graphics);
+       Check(twoLines.Height>singleLine.Height&&threeLines.Height>twoLines.Height&&Math.Abs(singleLine.Bottom-twoLines.Bottom)<.01&&Math.Abs(singleLine.Bottom-threeLines.Bottom)<.01,"wrapped speech grows upward with a fixed last-line bottom, scale "+bubbleScale);
+       pet.Bubble=originalBubble;
+      }
+      preview.Save(Path.Combine(folder,"bubble-right-"+bubbleScale.ToString(System.Globalization.CultureInfo.InvariantCulture)+".png"));
+     }
+    }
+    pet.State.scale=1;pet.ResetPosition();
     int before=Native.GetGuiResources(Process.GetCurrentProcess().Handle,0);Stopwatch perf=Stopwatch.StartNew();
     for(int i=0;i<180;i++){if(i%3==0)pet.Pat();else if(i%3==1)pet.Feed(true);else pet.Sleep(true);using(Bitmap frame=pet.RenderBitmap()){CheckFrame(frame,pet.Dpi);}pet.PaintFrame();}
     perf.Stop();int after=Native.GetGuiResources(Process.GetCurrentProcess().Handle,0);

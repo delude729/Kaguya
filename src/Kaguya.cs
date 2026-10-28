@@ -89,12 +89,13 @@ namespace KaguyaNative
         string pressedTarget="",hover="",focus="character";
         double bubbleUntil,imageUntil,shyStart=-10,panelChanged=-10,panelFrom,panelTo,lastTick,lastSave=-1;
         bool pendingSave;
+        double panelLayoutDelta;
         Bitmap cachedPanel;
         byte[] characterPixels;
         string cachedPanelKey="",lastScene="";
         double meterClock;
         internal double Now {get{return clock.Elapsed.TotalSeconds;}}
-        internal double PanelDelta {get{return Geometry.BoundarySprite(State.scale).Top-Geometry.BoundarySprite(1).Top;}}
+        internal double PanelDelta {get{return PanelOpen?panelLayoutDelta:Geometry.BoundarySprite(State.scale).Top-Geometry.BoundarySprite(1).Top;}}
         internal Pet(bool test):this(test,null){}
         internal Pet(bool test,string settingsDirectory)
         {
@@ -117,11 +118,8 @@ namespace KaguyaNative
             }
             Dictionary<string,object> source=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(root,"assets","ui","layout.json")));
             foreach(string key in new string[]{"panel","close","feed","pat","sleep","topmost","hide","badge","character","mood","energy","mood-label","energy-label"}) layout[key]=ReadRect((Dictionary<string,object>)source[key]);
-            System.Collections.IList scales=(System.Collections.IList)source["scales"];
-            for(int i=0;i<3;i++)layout["scale"+i]=ReadRect((Dictionary<string,object>)scales[i]);
-            RectangleF sizeStart=layout["scale0"];
-            layout["scale3"]=new RectangleF(sizeStart.X,sizeStart.Y,36,sizeStart.Height);
-            for(int i=0;i<3;i++)layout["scale"+i]=new RectangleF(sizeStart.X+38+28*i,sizeStart.Y,26,sizeStart.Height);
+            layout["size-slider"]=new RectangleF(97,353,96,27);
+            layout["size-reset"]=new RectangleF(230,353,35,27);
             Frame=State.sleeping?"sleep":"idle";
             ResetPosition();
             if(!test) {
@@ -195,13 +193,24 @@ namespace KaguyaNative
                 if(s!=null) {
                     if(!saved.ContainsKey("energy")&&saved.ContainsKey("milk"))s.energy=Convert.ToDouble(saved["milk"]);
                     State=s;State.mood=FiniteClamp(s.mood,80);State.energy=FiniteClamp(s.energy,75);
-                    if(s.scale!=.6&&s.scale!=.8&&s.scale!=1&&s.scale!=1.2)State.scale=1;
+                    State.scale=NormalizeScale(s.scale);
                 }
             }catch{}
             if(firstRun)State.topmost=true;
             try{var d=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(data,"movement-calibration.json")));freeMovement=d.ContainsKey("enabled")&&d["enabled"] is bool&&(bool)d["enabled"];}catch{}
         }
         double FiniteClamp(double v,double fallback){return double.IsNaN(v)||double.IsInfinity(v)?fallback:Math.Max(0,Math.Min(100,v));}
+        internal static double NormalizeScale(double value){return double.IsNaN(value)||double.IsInfinity(value)?1:Math.Round(Math.Max(.5,Math.Min(1.2,value))*100,MidpointRounding.AwayFromZero)/100;}
+        internal void SetScale(double value,bool save) {
+            State.scale=NormalizeScale(value);
+            if(!PanelOpen)Location=ClampLocation(Location,null);
+            if(save)SaveState(true);
+            PaintFrame();
+        }
+        internal void SlideSize(Point client) {
+            RectangleF r=layout["size-slider"];
+            SetScale(.5+.7*(client.X/Dpi-(r.Left+6))/(r.Width-12),false);
+        }
         internal void SaveState(bool force) {
             if(testing&&!isolatedSettings)return;
             pendingSave=true;if(!force&&Now-lastSave<.25)return;
@@ -227,6 +236,7 @@ namespace KaguyaNative
         internal void TogglePanel() {
             if(!State.panelEnabled)return;
             if(!PanelOpen) {
+                panelLayoutDelta=PanelDelta;
                 RectangleF r=Geometry.BoundarySprite(State.scale);Point c=new Point(Left+(int)((r.Left+r.Right)/2*Dpi),Top+(int)((r.Top+r.Bottom)/2*Dpi));
                 PointF p=Geometry.Clamp(Left/Dpi,Top/Dpi,Area(c),new RectangleF(0,0,380,726));
                 Location=new Point((int)Math.Round(p.X*Dpi),(int)Math.Round(p.Y*Dpi));SaveState(false);
@@ -243,7 +253,7 @@ namespace KaguyaNative
         internal string Target(Point p) {
             PointF q=new PointF(p.X/Dpi,p.Y/Dpi);
             if(PanelOpen&&Rect("panel").Contains(q)) {
-                foreach(string id in new string[]{"close","feed","pat","sleep","topmost","hide","scale3","scale0","scale1","scale2"})if(Rect(id).Contains(q))return id;
+                foreach(string id in new string[]{"close","feed","pat","sleep","topmost","hide","size-slider","size-reset"})if(Rect(id).Contains(q))return id;
                 return "panel";
             }
             if(Rect("badge").Contains(q))return "badge";
@@ -268,9 +278,12 @@ namespace KaguyaNative
             if(e.Button!=MouseButtons.Left)return;
             pressedTarget=Target(e.Location);if(pressedTarget=="")return;
             pressed=true;downScreen=PointToScreen(e.Location);Capture=true;focus=pressedTarget;UpdateCursor(pressedTarget);
+            if(pressedTarget=="size-slider")SlideSize(e.Location);
         }
         internal void MoveGesture(Point p) {
-            if(!pressed||pressedTarget!="character")return;
+            if(!pressed)return;
+            if(pressedTarget=="size-slider"){SlideSize(PointToClient(p));return;}
+            if(pressedTarget!="character")return;
             double dx=(p.X-downScreen.X)/Dpi,dy=(p.Y-downScreen.Y)/Dpi;
             bool began=false;
             if(!Dragging&&Math.Sqrt(dx*dx+dy*dy)>5) {
@@ -290,12 +303,13 @@ namespace KaguyaNative
         protected override void OnMouseUp(MouseEventArgs e) {
             base.OnMouseUp(e);if(e.Button!=MouseButtons.Left||!pressed)return;
             bool dragged=Dragging;string target=pressedTarget;
+            if(target=="size-slider"){SlideSize(e.Location);EndDrag();PaintFrame();return;}
             if(dragged)MoveGesture(PointToScreen(e.Location));
             EndDrag();
             if(!dragged&&(target=="character"||target==Target(e.Location)))ActivateTarget(target);
             PaintFrame();
         }
-        internal void EndDrag() {bool moved=Dragging;pressed=false;Dragging=false;pressedTarget="";Capture=false;if(hands!=null)UpdateCursor(Target(PointToClient(Cursor.Position)));if(moved){SaveState(false);RecordCalibration();}}
+        internal void EndDrag() {bool moved=Dragging,sized=pressed&&pressedTarget=="size-slider";pressed=false;Dragging=false;pressedTarget="";Capture=false;if(hands!=null)UpdateCursor(Target(PointToClient(Cursor.Position)));if(sized)SaveState(true);if(moved){SaveState(false);RecordCalibration();}}
         internal void UpdateCursor(string target){Cursor=Dragging||(pressed&&pressedTarget=="character")?hands.Grabbing:target=="character"?hands.Grab:target=="panel"||target==""||(target=="badge"&&!State.panelEnabled)?Cursors.Default:Cursors.Hand;}
         protected override void OnMouseCaptureChanged(EventArgs e){base.OnMouseCaptureChanged(e);if(!Capture&&pressed){EndDrag();PaintFrame();}}
         protected override void OnDeactivate(EventArgs e){base.OnDeactivate(e);if(pressed){EndDrag();PaintFrame();}}
@@ -307,7 +321,7 @@ namespace KaguyaNative
             else if(id=="topmost"){State.topmost=!State.topmost;TopMost=State.topmost;SaveState(true);}
             else if(id=="panel-enabled")TogglePanelEnabled();
             else if(id=="hide")Hide();
-            else if(id.StartsWith("scale")){int i=int.Parse(id.Substring(5));State.scale=new double[]{.8,1,1.2,.6}[i];Location=ClampLocation(Location,null);SaveState(false);}
+            else if(id=="size-reset")SetScale(1,true);
             PaintFrame();
         }
         internal void Say(string value){Bubble=value;bubbleUntil=Now+3.3;}
@@ -363,12 +377,19 @@ namespace KaguyaNative
             base.OnKeyDown(e);
             if(e.KeyCode==Keys.Escape&&PanelOpen){TogglePanel();e.Handled=true;return;}
             if(e.KeyCode==Keys.Tab) {
-                string[] order=PanelOpen?new string[]{"close","feed","pat","sleep","topmost","scale3","scale0","scale1","scale2","hide","character","badge"}:State.panelEnabled?new string[]{"character","badge"}:new string[]{"character"};
+                string[] order=PanelOpen?new string[]{"close","feed","pat","sleep","topmost","size-slider","size-reset","hide","character","badge"}:State.panelEnabled?new string[]{"character","badge"}:new string[]{"character"};
                 int i=Array.IndexOf(order,focus);focus=order[(i+(e.Shift?order.Length-1:1))%order.Length];PaintFrame();e.Handled=true;
+            }
+            if(PanelOpen&&focus=="size-slider") {
+                if(e.KeyCode==Keys.Left||e.KeyCode==Keys.Down){SetScale(State.scale-.01,true);e.Handled=true;}
+                else if(e.KeyCode==Keys.Right||e.KeyCode==Keys.Up){SetScale(State.scale+.01,true);e.Handled=true;}
+                else if(e.KeyCode==Keys.Home){SetScale(.5,true);e.Handled=true;}
+                else if(e.KeyCode==Keys.End){SetScale(1.2,true);e.Handled=true;}
+                if(e.Handled){e.SuppressKeyPress=true;return;}
             }
             if(e.KeyCode==Keys.Enter||e.KeyCode==Keys.Space){ActivateTarget(focus);e.Handled=true;e.SuppressKeyPress=true;}
         }
-        protected override bool IsInputKey(Keys keyData){Keys key=keyData&Keys.KeyCode;if(key==Keys.Tab||key==Keys.Enter||key==Keys.Space||key==Keys.Escape)return true;return base.IsInputKey(keyData);}
+        protected override bool IsInputKey(Keys keyData){Keys key=keyData&Keys.KeyCode;if(key==Keys.Tab||key==Keys.Enter||key==Keys.Space||key==Keys.Escape||key==Keys.Left||key==Keys.Right||key==Keys.Up||key==Keys.Down||key==Keys.Home||key==Keys.End)return true;return base.IsInputKey(keyData);}
         void RecordCalibration() {
             if(!freeMovement||testing)return;
             try{Directory.CreateDirectory(data);RectangleF r=Geometry.BoundarySprite(State.scale),a=Area(Cursor.Position);File.WriteAllText(Path.Combine(data,"movement-calibration-position.json"),json.Serialize(new {recordedAt=DateTime.UtcNow.ToString("o"),window=new{x=Left/Dpi,y=Top/Dpi,width=380,height=726},scale=State.scale,characterBounds=r,companionBounds=Geometry.Companion(State.scale),workArea=a,suggestedInsets=new{left=a.Left-Left/Dpi,top=a.Top-Top/Dpi}}));}catch{}
@@ -439,23 +460,22 @@ namespace KaguyaNative
             return b;
         }
         internal Bitmap PanelBitmap() {
-            int scale=State.scale==.8?0:State.scale==1?1:2;
+            int scale=1;
             Bitmap original=images["panel-"+(State.sleeping?1:0)+"-"+(State.topmost?1:0)+"-"+scale];
             Bitmap b=new Bitmap(original.Width,original.Height,PixelFormat.Format32bppPArgb);
             using(Graphics g=Graphics.FromImage(b)) {
                 g.DrawImageUnscaled(original,0,0);g.ScaleTransform(Dpi,Dpi);g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=TextRenderingHint.ClearTypeGridFit;
-                // Replace the baked three-size selector with a cached native four-size selector.
-                RectangleF first=layout["scale3"],last=layout["scale2"];
-                RectangleF sizes=new RectangleF(first.X-2,first.Y-2,last.Right-first.X+4,first.Height+4);
-                using(Brush background=new SolidBrush(C("#fffafb")))g.FillRectangle(background,new RectangleF(sizes.X-2,sizes.Y-2,sizes.Width+4,sizes.Height+5));
-                FillRound(g,sizes,7,C("#f3eaf0"));
-                string[] sizeIds={"scale3","scale0","scale1","scale2"},sizeLabels={"更小","小","中","大"};
-                double[] sizeValues={.6,.8,1,1.2};
-                for(int i=0;i<sizeIds.Length;i++) {
-                    RectangleF r=layout[sizeIds[i]];bool selected=State.scale==sizeValues[i];
-                    if(selected)FillRound(g,r,5,C("#fffafd"));
-                    TextAt(g,sizeLabels[i],10,C(selected?"#a36f84":"#443c45"),r,StringAlignment.Center);
-                }
+                // Render the slider at final DPI and cache it with the current percentage.
+                using(Brush background=new SolidBrush(C("#fffafb")))g.FillRectangle(background,new RectangleF(94,351,174,31));
+                RectangleF slider=layout["size-slider"];
+                float trackX=slider.Left+6,trackWidth=slider.Width-12,trackY=slider.Top+slider.Height/2-2;
+                float amount=(float)((State.scale-.5)/.7),knobX=trackX+trackWidth*amount;
+                FillRound(g,new RectangleF(trackX,trackY,trackWidth,4),2,C("#eee2e8"));
+                if(amount>0)FillRound(g,new RectangleF(trackX,trackY,trackWidth*amount,4),2,C("#ce9aab"));
+                using(Brush brush=new SolidBrush(C("#b86981")))g.FillEllipse(brush,knobX-5,trackY-3,10,10);
+                if(focus=="size-slider")using(Pen outline=new Pen(C("#ead9e2")))g.DrawEllipse(outline,knobX-7,trackY-5,14,14);
+                TextAt(g,Math.Round(State.scale*100).ToString("0")+"%",10,C("#a36f84"),new RectangleF(193,353,37,27),StringAlignment.Center);
+                TextAt(g,"重置",10,C("#aa8798"),layout["size-reset"],StringAlignment.Center);
                 foreach(string id in new string[]{"mood","energy"}) {RectangleF r=layout[id];FillRound(g,r,3,C("#eee5ea"));double value=id=="mood"?State.mood:State.energy;if(value>0)FillRound(g,new RectangleF(r.X,r.Y,(float)(r.Width*value/100),r.Height),3,C(id=="mood"?"#ce9aab":"#b3a9c9"));}
                 RectangleF mood=layout["mood-label"];mood.X=100;mood.Width=81;
                 TextAt(g,State.mood>60?"愉快":State.mood>30?"想见你":"想被关心",11,C("#b48e9a"),mood,StringAlignment.Far);
@@ -467,17 +487,33 @@ namespace KaguyaNative
                 }
             }return b;
         }
-        Bitmap GetPanel(){string key=State.sleeping+"/"+State.topmost+"/"+State.scale+"/"+State.mood+"/"+State.energy+"/"+hover;if(key!=cachedPanelKey){if(cachedPanel!=null)cachedPanel.Dispose();cachedPanel=PanelBitmap();cachedPanelKey=key;}return cachedPanel;}
-        void DrawBubble(Graphics g) {
+        Bitmap GetPanel(){string key=State.sleeping+"/"+State.topmost+"/"+State.scale+"/"+State.mood+"/"+State.energy+"/"+hover+"/"+focus;if(key!=cachedPanelKey){if(cachedPanel!=null)cachedPanel.Dispose();cachedPanel=PanelBitmap();cachedPanelKey=key;}return cachedPanel;}
+        internal RectangleF BubbleBounds(Graphics g) {
             RectangleF r=Geometry.BoundarySprite(State.scale),reference=Geometry.BoundarySprite(.8);
             Point c=new Point(Left+(int)((r.Left+r.Right)/2*Dpi),Top+(int)((r.Top+r.Bottom)/2*Dpi));RectangleF a=Area(c);
-            float x=(float)Math.Max(a.Left-Left/Dpi+4,Math.Min(65,a.Right-Left/Dpi-254));
+            // The sprite canvas includes asymmetric hair/ribbon space. Its body axis
+            // is already compensated to x=190, shared by the shadow and status bar.
+            float center=layout["badge"].Left+layout["badge"].Width/2;
+            float available=2*Math.Min(center-(a.Left-Left/Dpi+4),a.Right-Left/Dpi-4-center);
+            // Keep the bubble centered above the character, narrowing near either screen edge.
+            float width=Math.Max(24,Math.Min(250,available));
             float y=(float)Math.Max(a.Top-Top/Dpi+12,Math.Min(442+r.Top-reference.Top,a.Bottom-Top/Dpi-80));
             using(Font font=new Font("Microsoft YaHei UI",11,FontStyle.Regular,GraphicsUnit.Pixel)) {
-                SizeF size=g.MeasureString(Bubble,font,228);RectangleF rect=new RectangleF(x,y,250,(float)Math.Ceiling(size.Height)+22);
-                FillRound(g,new RectangleF(x,y+3,250,rect.Height),16,Color.FromArgb(12,114,70,91));FillRound(g,rect,16,Color.FromArgb(245,255,250,251));
+                float x=center-width/2;
+                SizeF size=g.MeasureString(Bubble,font,Math.Max(1,(int)Math.Floor(width-22)));
+                float height=(float)Math.Ceiling(size.Height)+22;
+                float singleHeight=(float)Math.Ceiling(g.MeasureString("辉夜",font).Height)+22;
+                // Anchor the last line to the single-line baseline; extra lines grow upward.
+                y=Math.Max(a.Top-Top/Dpi+12,y+singleHeight-height);
+                return new RectangleF(x,y,width,height);
+            }
+        }
+        void DrawBubble(Graphics g) {
+            RectangleF rect=BubbleBounds(g);
+            using(Font font=new Font("Microsoft YaHei UI",11,FontStyle.Regular,GraphicsUnit.Pixel)) {
+                FillRound(g,new RectangleF(rect.X,rect.Y+3,rect.Width,rect.Height),16,Color.FromArgb(12,114,70,91));FillRound(g,rect,16,Color.FromArgb(245,255,250,251));
                 using(GraphicsPath p=Round(rect,16))using(Pen pen=new Pen(C("#ead9e2")))g.DrawPath(pen,p);
-                using(Brush brush=new SolidBrush(C("#8e6074")))using(StringFormat sf=new StringFormat{Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center})g.DrawString(Bubble,font,brush,new RectangleF(x+10,y+11,230,rect.Height-22),sf);
+                using(Brush brush=new SolidBrush(C("#8e6074")))using(StringFormat sf=new StringFormat{Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Far})g.DrawString(Bubble,font,brush,new RectangleF(rect.X+10,rect.Y+11,rect.Width-20,rect.Height-22),sf);
             }
         }
         internal void PaintFrame(){
