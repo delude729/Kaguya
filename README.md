@@ -13,7 +13,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/states.png" width="880" alt="辉夜的四种状态：待机、摸摸头、一起喝茶、休息中（茶会面板展开）">
+  <img src="docs/states.png" width="880" alt="辉夜的五种状态：待机、摸摸头、一起喝茶、休息中、喝水提醒（茶会面板展开）">
 </p>
 
 ## 快速开始
