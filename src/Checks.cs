@@ -199,6 +199,10 @@ internal static class Checks {
     pet.SetScale(.73,false);pet.ActivateTarget("size-reset");Check(pet.State.scale==1,"reset restores 100 percent");
     pet.SetScale(.73,false);
     using(Bitmap panel=pet.PanelBitmap())panel.Save(Path.Combine(folder,"panel-size-slider.png"));
+    double frozenDelta=pet.PanelDelta;pet.SetScale(.5,false);pet.TogglePanel();
+    Check(!pet.PanelOpen&&pet.PanelDelta==frozenDelta,"closing after a resize keeps the panel offset frozen while it fades out");
+    wait.Restart();while(wait.ElapsedMilliseconds<120)Application.DoEvents();
+    Check(Math.Abs(pet.PanelDelta-Geometry.BoundarySprite(.5).Top+Geometry.BoundarySprite(1).Top)<.001,"closed panel resumes the live scale offset");
     pet.State.scale=1;pet.Location=pet.ClampLocation(new Point(500,-200),null);Point down=new Point(pet.Left+(int)(180*pet.Dpi),pet.Top+(int)(520*pet.Dpi));pet.TestPress(down);
     Check(pet.Cursor.Handle!=grabHandle&&!pet.Dragging,"press immediately uses grabbing cursor before crossing the drag threshold, matching CSS active");
     pet.MoveGesture(new Point(down.X+(int)(4*pet.Dpi),down.Y));Check(!pet.Dragging,"4px remains click");

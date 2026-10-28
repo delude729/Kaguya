@@ -95,7 +95,10 @@ namespace KaguyaNative
         string cachedPanelKey="",lastScene="";
         double meterClock;
         internal double Now {get{return clock.Elapsed.TotalSeconds;}}
-        internal double PanelDelta {get{return PanelOpen?panelLayoutDelta:Geometry.BoundarySprite(State.scale).Top-Geometry.BoundarySprite(1).Top;}}
+        double SpriteDelta {get{return Geometry.BoundarySprite(State.scale).Top-Geometry.BoundarySprite(1).Top;}}
+        // The panel must not move when the character is resized, nor jump when it
+        // fades out after a resize; keep the offset captured at open until invisible.
+        internal double PanelDelta {get{return PanelOpen||PanelAlpha>0?panelLayoutDelta:SpriteDelta;}}
         internal Pet(bool test):this(test,null){}
         internal Pet(bool test,string settingsDirectory)
         {
@@ -236,7 +239,7 @@ namespace KaguyaNative
         internal void TogglePanel() {
             if(!State.panelEnabled)return;
             if(!PanelOpen) {
-                panelLayoutDelta=PanelDelta;
+                panelLayoutDelta=SpriteDelta;
                 RectangleF r=Geometry.BoundarySprite(State.scale);Point c=new Point(Left+(int)((r.Left+r.Right)/2*Dpi),Top+(int)((r.Top+r.Bottom)/2*Dpi));
                 PointF p=Geometry.Clamp(Left/Dpi,Top/Dpi,Area(c),new RectangleF(0,0,380,726));
                 Location=new Point((int)Math.Round(p.X*Dpi),(int)Math.Round(p.Y*Dpi));SaveState(false);
