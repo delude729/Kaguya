@@ -49,11 +49,13 @@ namespace KaguyaNative
         }
         // Original main.cjs baseline: 629 + layoutTopPadding (46) = 675.
         internal static RectangleF BoundarySprite(double s) { return Sprite(s); }
+        // Preserve the original 1.2x right-side gap at every character size.
+        internal const float RightInset=44.125f;
         internal static RectangleF Companion(double s) {
             RectangleF reference=BoundarySprite(.8),r=BoundarySprite(s);
             double marginLeft=reference.Left-93-(Center(.8)-204),marginTop=reference.Top-410-46;
             return RectangleF.FromLTRB((float)(r.Left-marginLeft),(float)(r.Top-marginTop),
-                (float)(Math.Max(Math.Max(r.Right,Center(s)+110*s),315)+4),Math.Max(r.Bottom,705)+12);
+                r.Right+RightInset,Math.Max(r.Bottom,705)+12);
         }
         internal static PointF Clamp(double x,double y,RectangleF area,RectangleF r) {
             return new PointF((float)Math.Floor(Math.Max(area.Left-r.Left,Math.Min(x,area.Right-r.Right))+.5),
@@ -117,6 +119,9 @@ namespace KaguyaNative
             foreach(string key in new string[]{"panel","close","feed","pat","sleep","topmost","hide","badge","character","mood","energy","mood-label","energy-label"}) layout[key]=ReadRect((Dictionary<string,object>)source[key]);
             System.Collections.IList scales=(System.Collections.IList)source["scales"];
             for(int i=0;i<3;i++)layout["scale"+i]=ReadRect((Dictionary<string,object>)scales[i]);
+            RectangleF sizeStart=layout["scale0"];
+            layout["scale3"]=new RectangleF(sizeStart.X,sizeStart.Y,36,sizeStart.Height);
+            for(int i=0;i<3;i++)layout["scale"+i]=new RectangleF(sizeStart.X+38+28*i,sizeStart.Y,26,sizeStart.Height);
             Frame=State.sleeping?"sleep":"idle";
             ResetPosition();
             if(!test) {
@@ -190,7 +195,7 @@ namespace KaguyaNative
                 if(s!=null) {
                     if(!saved.ContainsKey("energy")&&saved.ContainsKey("milk"))s.energy=Convert.ToDouble(saved["milk"]);
                     State=s;State.mood=FiniteClamp(s.mood,80);State.energy=FiniteClamp(s.energy,75);
-                    if(s.scale!=.8&&s.scale!=1&&s.scale!=1.2)State.scale=1;
+                    if(s.scale!=.6&&s.scale!=.8&&s.scale!=1&&s.scale!=1.2)State.scale=1;
                 }
             }catch{}
             if(firstRun)State.topmost=true;
@@ -238,7 +243,7 @@ namespace KaguyaNative
         internal string Target(Point p) {
             PointF q=new PointF(p.X/Dpi,p.Y/Dpi);
             if(PanelOpen&&Rect("panel").Contains(q)) {
-                foreach(string id in new string[]{"close","feed","pat","sleep","topmost","hide","scale0","scale1","scale2"})if(Rect(id).Contains(q))return id;
+                foreach(string id in new string[]{"close","feed","pat","sleep","topmost","hide","scale3","scale0","scale1","scale2"})if(Rect(id).Contains(q))return id;
                 return "panel";
             }
             if(Rect("badge").Contains(q))return "badge";
@@ -302,7 +307,7 @@ namespace KaguyaNative
             else if(id=="topmost"){State.topmost=!State.topmost;TopMost=State.topmost;SaveState(true);}
             else if(id=="panel-enabled")TogglePanelEnabled();
             else if(id=="hide")Hide();
-            else if(id.StartsWith("scale")){int i=int.Parse(id.Substring(5));State.scale=new double[]{.8,1,1.2}[i];Location=ClampLocation(Location,null);SaveState(false);}
+            else if(id.StartsWith("scale")){int i=int.Parse(id.Substring(5));State.scale=new double[]{.8,1,1.2,.6}[i];Location=ClampLocation(Location,null);SaveState(false);}
             PaintFrame();
         }
         internal void Say(string value){Bubble=value;bubbleUntil=Now+3.3;}
@@ -358,7 +363,7 @@ namespace KaguyaNative
             base.OnKeyDown(e);
             if(e.KeyCode==Keys.Escape&&PanelOpen){TogglePanel();e.Handled=true;return;}
             if(e.KeyCode==Keys.Tab) {
-                string[] order=PanelOpen?new string[]{"close","feed","pat","sleep","topmost","scale0","scale1","scale2","hide","character","badge"}:State.panelEnabled?new string[]{"character","badge"}:new string[]{"character"};
+                string[] order=PanelOpen?new string[]{"close","feed","pat","sleep","topmost","scale3","scale0","scale1","scale2","hide","character","badge"}:State.panelEnabled?new string[]{"character","badge"}:new string[]{"character"};
                 int i=Array.IndexOf(order,focus);focus=order[(i+(e.Shift?order.Length-1:1))%order.Length];PaintFrame();e.Handled=true;
             }
             if(e.KeyCode==Keys.Enter||e.KeyCode==Keys.Space){ActivateTarget(focus);e.Handled=true;e.SuppressKeyPress=true;}
@@ -439,6 +444,18 @@ namespace KaguyaNative
             Bitmap b=new Bitmap(original.Width,original.Height,PixelFormat.Format32bppPArgb);
             using(Graphics g=Graphics.FromImage(b)) {
                 g.DrawImageUnscaled(original,0,0);g.ScaleTransform(Dpi,Dpi);g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=TextRenderingHint.ClearTypeGridFit;
+                // Replace the baked three-size selector with a cached native four-size selector.
+                RectangleF first=layout["scale3"],last=layout["scale2"];
+                RectangleF sizes=new RectangleF(first.X-2,first.Y-2,last.Right-first.X+4,first.Height+4);
+                using(Brush background=new SolidBrush(C("#fffafb")))g.FillRectangle(background,new RectangleF(sizes.X-2,sizes.Y-2,sizes.Width+4,sizes.Height+5));
+                FillRound(g,sizes,7,C("#f3eaf0"));
+                string[] sizeIds={"scale3","scale0","scale1","scale2"},sizeLabels={"更小","小","中","大"};
+                double[] sizeValues={.6,.8,1,1.2};
+                for(int i=0;i<sizeIds.Length;i++) {
+                    RectangleF r=layout[sizeIds[i]];bool selected=State.scale==sizeValues[i];
+                    if(selected)FillRound(g,r,5,C("#fffafd"));
+                    TextAt(g,sizeLabels[i],10,C(selected?"#a36f84":"#443c45"),r,StringAlignment.Center);
+                }
                 foreach(string id in new string[]{"mood","energy"}) {RectangleF r=layout[id];FillRound(g,r,3,C("#eee5ea"));double value=id=="mood"?State.mood:State.energy;if(value>0)FillRound(g,new RectangleF(r.X,r.Y,(float)(r.Width*value/100),r.Height),3,C(id=="mood"?"#ce9aab":"#b3a9c9"));}
                 RectangleF mood=layout["mood-label"];mood.X=100;mood.Width=81;
                 TextAt(g,State.mood>60?"愉快":State.mood>30?"想见你":"想被关心",11,C("#b48e9a"),mood,StringAlignment.Far);

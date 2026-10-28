@@ -33,6 +33,8 @@ internal static class Checks {
    Check(migrated.Contains("\"energy\":37")&&!migrated.Contains("\"milk\""),"new saves contain only the energy key");
    File.WriteAllText(Path.Combine(settings,"pet-state.json"),"{\"energy\":29,\"milk\":91}");
    using(Pet current=new Pet(true,settings))Check(current.State.energy==29,"current energy key takes precedence over legacy key");
+   using(Pet smaller=new Pet(true,settings))smaller.ActivateTarget("scale3");
+   using(Pet reloaded=new Pet(true,settings))Check(reloaded.State.scale==.6,"extra-small size survives save and reload");
    Directory.Delete(settings,true);
    using(Pet pet=new Pet(true)) {
     pet.Show();Application.DoEvents();
@@ -72,7 +74,8 @@ internal static class Checks {
     var baseline=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(folder,"original-geometry.json")));
     foreach(Dictionary<string,object> item in (System.Collections.IList)baseline["cases"]) {
      double scale=Convert.ToDouble(item["scale"]);var orig=(Dictionary<string,object>)item["companion"];RectangleF actual=Geometry.Companion(scale);
-     Check(Math.Abs(actual.Left-Convert.ToDouble(orig["left"]))<.001&&Math.Abs(actual.Top-Convert.ToDouble(orig["top"]))<.001&&Math.Abs(actual.Right-Convert.ToDouble(orig["right"]))<.001&&Math.Abs(actual.Bottom-Convert.ToDouble(orig["bottom"]))<.001,"movement geometry matches original JavaScript at scale "+scale);
+     Check(Math.Abs(actual.Left-Convert.ToDouble(orig["left"]))<.001&&Math.Abs(actual.Top-Convert.ToDouble(orig["top"]))<.001&&Math.Abs(actual.Bottom-Convert.ToDouble(orig["bottom"]))<.001,"left, top and bottom movement geometry matches original JavaScript at scale "+scale);
+     if(scale==1.2)Check(Math.Abs(actual.Right-Convert.ToDouble(orig["right"]))<.001,"large size retains its original right boundary");
     }
     Point outside=pet.PointToScreen(new Point(5,5)),inside=pet.PointToScreen(new Point((int)(46*pet.Dpi),(int)(500*pet.Dpi)));
     Func<Point,IntPtr> pack=p=>new IntPtr((p.Y<<16)|(p.X&65535));
@@ -142,7 +145,7 @@ internal static class Checks {
     pet.TogglePanel();
     // Let the panel and speech bubble disappear before inspecting blank pixels.
     wait.Restart();while(wait.ElapsedMilliseconds<3400)Application.DoEvents();
-    foreach(double scale in new double[]{.8,1,1.2}) {
+    foreach(double scale in new double[]{.6,.8,1,1.2}) {
      pet.State.scale=scale;
      foreach(string frame in new string[]{"idle","happy","tea","sleep"}) {
       pet.Frame=frame;pet.State.sleeping=frame=="sleep";
@@ -160,6 +163,7 @@ internal static class Checks {
      pet.State.sleeping=false;pet.Frame="idle";
      RectangleF a=new RectangleF(0,0,1536,864),r=Geometry.Companion(scale);PointF left=Geometry.Clamp(-9999,-9999,a,r),right=Geometry.Clamp(9999,9999,a,r);
      Check(Math.Abs(left.X+r.Left)<.51&&Math.Abs(left.Y+r.Top)<.51&&Math.Abs(right.X+r.Right-1536)<.51&&Math.Abs(right.Y+r.Bottom-864)<.51,"all four original movement limits at scale "+scale);
+     Check(Math.Abs(1536-(right.X+Geometry.BoundarySprite(scale).Right)-44.125)<.51,"right-side character gap matches original large size at scale "+scale);
      using(Bitmap b=pet.RenderBitmap())b.Save(Path.Combine(folder,"native-scale-"+scale.ToString(System.Globalization.CultureInfo.InvariantCulture)+".png"));
     }
     pet.TogglePanel();
@@ -179,6 +183,12 @@ internal static class Checks {
     pet.State.energy=99;pet.State.mood=99;pet.Feed(true);pet.Pat();Check(pet.State.energy==100&&pet.State.mood==100,"meters clamp to 100");
     bool top=pet.State.topmost;pet.ActivateTarget("topmost");Check(pet.TopMost!=top&&pet.State.topmost!=top,"topmost toggle");
     pet.ActivateTarget("scale0");Check(pet.State.scale==.8,"small size");pet.ActivateTarget("scale1");Check(pet.State.scale==1,"medium size");pet.ActivateTarget("scale2");Check(pet.State.scale==1.2,"large size");
+    pet.ActivateTarget("scale3");Check(pet.State.scale==.6,"extra-small size");
+    foreach(string id in new string[]{"scale3","scale0","scale1","scale2"}) {
+     RectangleF button=pet.Rect(id);
+     Check(pet.Target(new Point((int)((button.X+button.Width/2)*pet.Dpi),(int)((button.Y+button.Height/2)*pet.Dpi)))==id,"four-size selector hit target "+id);
+    }
+    using(Bitmap panel=pet.PanelBitmap())panel.Save(Path.Combine(folder,"panel-four-sizes.png"));
     pet.State.scale=1;pet.Location=pet.ClampLocation(new Point(500,-200),null);Point down=new Point(pet.Left+(int)(180*pet.Dpi),pet.Top+(int)(520*pet.Dpi));pet.TestPress(down);
     Check(pet.Cursor.Handle!=grabHandle&&!pet.Dragging,"press immediately uses grabbing cursor before crossing the drag threshold, matching CSS active");
     pet.MoveGesture(new Point(down.X+(int)(4*pet.Dpi),down.Y));Check(!pet.Dragging,"4px remains click");
