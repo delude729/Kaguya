@@ -191,9 +191,6 @@ namespace KaguyaNative
         internal Bitmap BadgeBitmap(){return (Bitmap)images["badge-"+(State.sleeping?1:0)+"-"+(PanelOpen?1:0)].Clone();}
         void LoadState() {
             string path=Path.Combine(data,"pet-state.json");
-            bool firstRun=!File.Exists(path);
-            // Legacy folder and JSON key are read only for one-way save migration.
-            if(firstRun&&!isolatedSettings)path=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"naiwa-desktop-pet","pet-state.json");
             try {
                 string content=File.ReadAllText(path);
                 State s=json.Deserialize<State>(content);
@@ -205,7 +202,6 @@ namespace KaguyaNative
                     State.waterMinutes=Math.Max(1,Math.Min(1440,s.waterMinutes));
                 }
             }catch{}
-            if(firstRun)State.topmost=true;
             try{var d=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(data,"movement-calibration.json")));freeMovement=d.ContainsKey("enabled")&&d["enabled"] is bool&&(bool)d["enabled"];}catch{}
         }
         double FiniteClamp(double v,double fallback){return double.IsNaN(v)||double.IsInfinity(v)?fallback:Math.Max(0,Math.Min(100,v));}

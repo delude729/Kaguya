@@ -52,7 +52,7 @@ electron tools\export-ui.cjs --ui-scale=1.25
 - 角色五张 PNG 在启动时解码，动作切换不读磁盘；喝水提醒使用 `water-offer.png`，复用现有气泡和角色缩放逻辑。`water-sip.png` 暂未使用、不随启动加载，保留给后续动作设计。
 - 鼠标移动直接更新窗口位置，不通过浏览器进程通信或轮询追踪。
 - 存档写入 `%APPDATA%\kaguya-native-pet\pet-state.json`。
-- 首次运行会尝试读取旧版 `%APPDATA%\naiwa-desktop-pet\pet-state.json` 中的心情、元气、休息、置顶和大小；之后独立保存。
+- 仅从 `%APPDATA%\kaguya-native-pet\pet-state.json` 读取存档；没有存档时使用默认设置。
 - 新存档使用 `energy` 字段；旧 `milk` 字段只用于兼容读取。
 - 喝水设置保存为 `waterEnabled`（默认 false）、`waterMinutes`（默认 30，范围 1～1440）。以进程单调时钟计时，启动或修改设置时重置截止时间；到期暂缓期间不积累提醒队列。休息状态照常提醒；隐藏时到期会重新显示角色并提醒。拖动、编辑间隔、菜单或正在对话时等待，之后只触发一次，直接递杯动作持续 4 秒，手动互动可中断。
 - 托盘右键菜单提供“喝水提醒”开关和“提醒间隔”设置。间隔使用 ToolStripControlHost 内嵌输入框，点击数字时激活菜单并获取键盘焦点；回车或失焦/关闭菜单保存有效值，Esc 取消，非法值不覆盖原配置。普通菜单操作维持不抢焦点。面板不包含喝水控件。
