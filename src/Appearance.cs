@@ -51,17 +51,19 @@ namespace KaguyaNative {
     }
     internal sealed class RoundedMenu:ContextMenuStrip {
         readonly float dpi;
+        readonly int logicalWidth;
         readonly Font menuFont;
         internal IntPtr PopupOwner;
         bool keyboardInput;
         IntPtr outsideClickHook;
         Native.MouseHook outsideClickCallback;
-        internal RoundedMenu(float scale) {
-            dpi=scale;AutoSize=false;ShowImageMargin=false;ShowCheckMargin=false;
+        internal RoundedMenu(float scale):this(scale,154,false){}
+        internal RoundedMenu(float scale,int width,bool shadow) {
+            logicalWidth=width;dpi=scale;AutoSize=false;ShowImageMargin=false;ShowCheckMargin=false;
             BackColor=Color.White;ForeColor=Color.FromArgb(20,20,20);
             menuFont=new Font("Microsoft YaHei UI",11*scale,FontStyle.Regular,GraphicsUnit.Pixel);Font=menuFont;
             Padding=new Padding(0,(int)Math.Round(12*scale),0,(int)Math.Round(12*scale));
-            Renderer=new MenuRenderer(scale);DropShadowEnabled=false;
+            Renderer=new MenuRenderer(scale);DropShadowEnabled=shadow;
         }
         protected override CreateParams CreateParams {get{CreateParams p=base.CreateParams;p.ExStyle=(p.ExStyle|0x80|0x08000000)&~0x40000;if(PopupOwner!=IntPtr.Zero)p.Parent=PopupOwner;return p;}}
         internal void EnableKeyboardInput(){keyboardInput=true;Native.SetWindowLong(Handle,-20,Native.GetWindowLong(Handle,-20)&~0x08000000);Native.SetForegroundWindow(Handle);}
@@ -82,12 +84,23 @@ namespace KaguyaNative {
             int msg=message.ToInt32();
             if(code>=0&&(msg==0x201||msg==0x204||msg==0x207||msg==0x20b)&&Visible){
                 Native.Point point=(Native.Point)System.Runtime.InteropServices.Marshal.PtrToStructure(data,typeof(Native.Point));
-                Point local=PointToClient(new Point(point.X,point.Y));
-                if(!ClientRectangle.Contains(local)||(Region!=null&&!Region.IsVisible(local)))
+                if(!ContainsMenuPoint(new Point(point.X,point.Y)))
                     BeginInvoke((Action)delegate{if(!IsDisposed&&Visible)Close(ToolStripDropDownCloseReason.AppClicked);});
             }
             // Observe only: the original click must still reach its target.
             return Native.CallNextHookEx(outsideClickHook,code,message,data);
+        }
+        bool ContainsMenuPoint(Point screen) {
+            Point local=PointToClient(screen);
+            if(ClientRectangle.Contains(local)&&(Region==null||Region.IsVisible(local)))return true;
+            foreach(ToolStripItem item in Items) {
+                ToolStripMenuItem entry=item as ToolStripMenuItem;
+                if(entry!=null&&entry.HasDropDownItems&&entry.DropDown.Visible) {
+                    RoundedMenu child=entry.DropDown as RoundedMenu;
+                    if(child!=null&&child.ContainsMenuPoint(screen))return true;
+                }
+            }
+            return false;
         }
         void StopObservingMouse(){if(outsideClickHook!=IntPtr.Zero){Native.UnhookWindowsHookEx(outsideClickHook);outsideClickHook=IntPtr.Zero;}outsideClickCallback=null;}
         protected override void OnClosed(ToolStripDropDownClosedEventArgs e){StopObservingMouse();WaterIntervalItem field=Items["water-interval"] as WaterIntervalItem;if(field!=null)field.EndSession();if(keyboardInput){keyboardInput=false;Native.SetWindowLong(Handle,-20,Native.GetWindowLong(Handle,-20)|0x08000000);}base.OnClosed(e);}
@@ -102,7 +115,7 @@ namespace KaguyaNative {
             Show(owner,owner.PointToClient(anchor),ToolStripDropDownDirection.AboveRight);
         }
         internal void Prepare() {
-            int width=(int)Math.Round(154*dpi),row=(int)Math.Round(28*dpi),height=Padding.Vertical;
+            int width=(int)Math.Round(logicalWidth*dpi),row=(int)Math.Round(28*dpi),height=Padding.Vertical;
             foreach(ToolStripItem item in Items) {
                 item.AutoSize=false;item.Margin=Padding.Empty;item.Padding=Padding.Empty;
                 item.Size=new Size(width,item is ToolStripSeparator?(int)Math.Round(18*dpi):row);
@@ -135,6 +148,12 @@ namespace KaguyaNative {
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e) {
             Rectangle rect=new Rectangle(Point.Empty,e.Item.Size);
             TextRenderer.DrawText(e.Graphics,e.Text,e.TextFont,rect,e.Item.Enabled?Color.FromArgb(20,20,20):Color.FromArgb(165,165,165),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix|TextFormatFlags.NoPadding);
+            ToolStripMenuItem submenu=e.Item as ToolStripMenuItem;
+            if(submenu!=null&&submenu.HasDropDownItems) {
+                float x=e.Item.Width-15*dpi,y=e.Item.Height/2f;
+                using(Pen arrow=new Pen(Color.FromArgb(100,100,100),Math.Max(1,dpi)))
+                    e.Graphics.DrawLines(arrow,new PointF[]{new PointF(x-2*dpi,y-3*dpi),new PointF(x+dpi,y),new PointF(x-2*dpi,y+3*dpi)});
+            }
             if((string)e.Item.Tag=="toggle") {
                 ToolStripMenuItem item=e.Item as ToolStripMenuItem;bool on=item!=null&&item.Checked;
                 float w=20*dpi,h=11*dpi,x=e.Item.Width-27*dpi,y=(e.Item.Height-h)/2;

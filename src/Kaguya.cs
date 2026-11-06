@@ -33,9 +33,15 @@ namespace KaguyaNative
             }
         }
     }
+    internal sealed class CharacterState
+    {
+        public double mood=80,energy=75;
+        public bool sleeping=false;
+    }
     internal sealed class State
     {
         public string character="kaguya";
+        public Dictionary<string,CharacterState> characters=new Dictionary<string,CharacterState>();
         public double mood=80,energy=75,scale=.7;
         public bool sleeping=false,topmost=true,panelEnabled=true;
         public bool waterEnabled=false;
@@ -99,7 +105,7 @@ namespace KaguyaNative
 
         internal bool IsHayasaka {get{return State.character=="hayasaka";}}
         internal string InteractionLabel {get{return "摸摸头";}}
-        internal string CharacterName {get{return State.character=="hayasaka"?"早坂爱":"辉夜";}}
+        internal string CharacterName {get{return State.character=="fujiwara"?"藤原":State.character=="hayasaka"?"早坂爱":"辉夜";}}
         internal double NextWaterAt {get{return nextWaterAt;}}
         Bitmap cachedPanel;
         byte[] characterPixels;
@@ -123,7 +129,7 @@ namespace KaguyaNative
             FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;StartPosition=FormStartPosition.Manual;
             AutoScaleMode=AutoScaleMode.None;ClientSize=new Size((int)Math.Round(380*Dpi),(int)Math.Round(726*Dpi));
             Text=Title;TopMost=State.topmost;KeyPreview=true;
-            foreach(string person in new string[]{"kaguya","hayasaka"})
+            foreach(string person in new string[]{"kaguya","hayasaka","fujiwara"})
                 foreach(string name in new string[]{"idle","happy","tea","sleep","water-offer"}) LoadImage(person+"/"+name,Path.Combine("assets",person,name+".png"));
             foreach(string pose in new string[]{"pat-notice","pat-relaxed"})LoadImage("hayasaka/"+pose,Path.Combine("assets","hayasaka",pose+".png"));
             for(int s=0;s<2;s++)for(int t=0;t<2;t++)for(int z=0;z<3;z++) {
@@ -180,7 +186,8 @@ namespace KaguyaNative
             using(Graphics g=Graphics.FromImage(bitmap)) {
                 g.TextRenderingHint=TextRenderingHint.ClearTypeGridFit;
                 foreach(string id in new string[]{"badge-name","badge-state"}) {
-                    var label=(Dictionary<string,object>)labels[id];RectangleF logical=ReadRect(label);if(id=="badge-name"&&State.character=="hayasaka"){logical.X-=5;logical.Width+=12;}
+                    var label=(Dictionary<string,object>)labels[id];RectangleF logical=ReadRect(label);
+                    if(id=="badge-name"&&IsHayasaka){logical.X-=5;logical.Width+=12;}
                     RectangleF pixels=new RectangleF((float)Math.Round(logical.X*Dpi),(float)Math.Round(logical.Y*Dpi),(float)Math.Round(logical.Width*Dpi),(float)Math.Round(logical.Height*Dpi));
                     // Draw directly into the final-size cached badge; never scale these glyphs.
                     using(Font font=new Font("Microsoft YaHei UI",Convert.ToSingle(label["fontSize"])*Dpi,FontStyle.Regular,GraphicsUnit.Pixel))
@@ -204,9 +211,13 @@ namespace KaguyaNative
                 var saved=json.Deserialize<Dictionary<string,object>>(content);
                 if(s!=null) {
                     if(!saved.ContainsKey("energy")&&saved.ContainsKey("milk"))s.energy=Convert.ToDouble(saved["milk"]);
-                    State=s;State.character=s.character=="hayasaka"?"hayasaka":"kaguya";State.mood=FiniteClamp(s.mood,80);State.energy=FiniteClamp(s.energy,75);
+                    State=s;State.character=s.character=="fujiwara"?"fujiwara":s.character=="hayasaka"?"hayasaka":"kaguya";State.mood=FiniteClamp(s.mood,80);State.energy=FiniteClamp(s.energy,75);
                     State.scale=NormalizeScale(s.scale);
                     State.waterMinutes=Math.Max(1,Math.Min(1440,s.waterMinutes));
+                    if(State.characters==null)State.characters=new Dictionary<string,CharacterState>();
+                    CharacterState selected;
+                    if(State.characters.TryGetValue(State.character,out selected)&&selected!=null)RestoreCharacter(selected);
+                    else CaptureCharacter(); // Migrate the old shared state to its selected character only.
                 }
             }catch{}
             try{var d=json.Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(data,"movement-calibration.json")));freeMovement=d.ContainsKey("enabled")&&d["enabled"] is bool&&(bool)d["enabled"];}catch{}
@@ -219,10 +230,19 @@ namespace KaguyaNative
             if(save)SaveState(true);
             PaintFrame();
         }
+        void CaptureCharacter() {
+            State.characters[State.character]=new CharacterState{mood=State.mood,energy=State.energy,sleeping=State.sleeping};
+        }
+        void RestoreCharacter(CharacterState saved) {
+            State.mood=FiniteClamp(saved.mood,80);State.energy=FiniteClamp(saved.energy,75);State.sleeping=saved.sleeping;
+        }
         internal void SetCharacter(string character) {
-            if(character!="kaguya"&&character!="hayasaka")return;
+            if(character!="kaguya"&&character!="hayasaka"&&character!="fujiwara")return;
             if(State.character==character)return;
-            EndDrag();State.character=character;
+            EndDrag();CaptureCharacter();State.character=character;
+            CharacterState selected;
+            if(!State.characters.TryGetValue(character,out selected)||selected==null)selected=new CharacterState();
+            RestoreCharacter(selected);meterClock=Now;
             waterStarted=-1;waterPreviousFrame=null;imageUntil=0;shyStart=-10;
             Frame=State.sleeping?"sleep":"idle";Speak(State.sleeping?"sleeping":"greeting");
             foreach(string name in new string[]{"badge-0-0","badge-0-1","badge-1-0","badge-1-1"}) {
@@ -239,7 +259,7 @@ namespace KaguyaNative
         internal void SaveState(bool force) {
             if(testing&&!isolatedSettings)return;
             pendingSave=true;if(!force&&Now-lastSave<.25)return;
-            try{Directory.CreateDirectory(data);State.x=Left/Dpi;State.y=Top/Dpi;string p=Path.Combine(data,"pet-state.json"),tmp=p+".tmp";File.WriteAllText(tmp,json.Serialize(State));if(File.Exists(p))File.Replace(tmp,p,null);else File.Move(tmp,p);lastSave=Now;pendingSave=false;}catch(Exception e){Debug.WriteLine(e);}
+            try{CaptureCharacter();Directory.CreateDirectory(data);State.x=Left/Dpi;State.y=Top/Dpi;string p=Path.Combine(data,"pet-state.json"),tmp=p+".tmp";File.WriteAllText(tmp,json.Serialize(State));if(File.Exists(p))File.Replace(tmp,p,null);else File.Move(tmp,p);lastSave=Now;pendingSave=false;}catch(Exception e){Debug.WriteLine(e);}
         }
         protected override CreateParams CreateParams {get{CreateParams p=base.CreateParams;p.ExStyle=(p.ExStyle|0x80000|0x80|0x08000000)&~0x40000;p.ClassStyle|=8;return p;}}
         protected override bool ShowWithoutActivation {get{return true;}}
@@ -372,7 +392,19 @@ namespace KaguyaNative
         }
         internal void Speak(string eventName) {
             string[] lines;
-            if(IsHayasaka) {
+            if(State.character=="fujiwara") {
+                switch(eventName) {
+                    case "greeting":lines=new string[]{"锵锵！藤原登场！今天一起开心地玩吧！"};break;
+                    case "interaction":lines=new string[]{"嘿嘿，好舒服！再摸一下也可以哦！","是奖励吗？那我要超大份的！"};break;
+                    case "sleeping":lines=new string[]{"呼……游戏规则，睡醒再讲……"};break;
+                    case "tea-sleeping":lines=new string[]{"茶和点心帮我留着哦……呼……"};break;
+                    case "tea":lines=new string[]{"茶会开始！有点心的话就更完美啦！"};break;
+                    case "sleep":lines=new string[]{"千花能量用完啦……先睡一小会儿！"};break;
+                    case "wake":lines=new string[]{"充电完成！接下来一起玩什么呢？"};break;
+                    case "water":lines=new string[]{"喝水时间到！来，和我一起干杯吧！"};break;
+                    default:throw new ArgumentException("Unknown dialogue event", "eventName");
+                }
+            }else if(IsHayasaka) {
                 switch(eventName) {
                     case "greeting":lines=new string[]{"总算有空了。借这里待一会儿，不介意吧？","今天没有什么麻烦事吧？我想安静地歇一会儿"};break;
                     case "interaction":lines=new string[]{"……突然做什么？至少先打声招呼吧","发型会乱的……算了，待会儿再整理","平时都是我照顾别人。这样倒是有点新鲜","……嗯。这样待一会儿，也不错"};break;
@@ -458,7 +490,7 @@ namespace KaguyaNative
             if(menu!=null&&Math.Abs(menuScale-targetScale)>.001f){menu.Close();menu.Dispose();menu=null;}
             if(menu==null){menuScale=targetScale;menu=CreateMenu(targetScale);}
             menu.Items["show"].Text="显示"+CharacterName;menu.Items["exit"].Text="退出"+CharacterName;
-            menu.Items["switch-character"].Text="切换人物："+(State.character=="kaguya"?"早坂爱":"辉夜");
+            RefreshCharacterChoices((ToolStripMenuItem)menu.Items["switch-character"]);
             menu.Items["feed"].Enabled=!State.sleeping;
             menu.Items["sleep"].Text=State.sleeping?"叫醒"+CharacterName:"休息一会";
             ((ToolStripMenuItem)menu.Items["topmost"]).Checked=State.topmost;
@@ -480,7 +512,22 @@ namespace KaguyaNative
             result.Items.Add(new WaterIntervalItem(scale,delegate{return State.waterMinutes;},delegate(int minutes){return SetWaterReminder(State.waterEnabled,minutes);}));
             result.Items.Add("回到屏幕右下角",null,delegate{ResetPosition();PaintFrame();});result.Items.Add(new ToolStripSeparator());
             result.Items.Add("暂时隐藏",null,delegate{Hide();});result.Items.Add("退出"+CharacterName,null,delegate{Close();}).Name="exit";
-            result.Items.Add("切换人物："+(State.character=="kaguya"?"早坂爱":"辉夜"),null,delegate{SetCharacter(State.character=="kaguya"?"hayasaka":"kaguya");}).Name="switch-character";result.Prepare();return result;
+            ToolStripMenuItem characters=new ToolStripMenuItem("切换人物");characters.Name="switch-character";
+            RoundedMenu choices=new RoundedMenu(scale,100,true);choices.PopupOwner=Handle;characters.DropDown=choices;
+            foreach(string id in new string[]{"kaguya","hayasaka","fujiwara"}) {
+                string selected=id;
+                ToolStripMenuItem item=new ToolStripMenuItem("",null,delegate{SetCharacter(selected);RefreshCharacterChoices(characters);});
+                item.Name=id;choices.Items.Add(item);
+            }
+            characters.DropDownOpening+=delegate{RefreshCharacterChoices(characters);};
+            RefreshCharacterChoices(characters);choices.Prepare();result.Items.Add(characters);result.Prepare();return result;
+        }
+        void RefreshCharacterChoices(ToolStripMenuItem choices) {
+            foreach(ToolStripMenuItem item in choices.DropDownItems) {
+                item.Checked=item.Name==State.character;
+                string name=item.Name=="kaguya"?"辉夜":item.Name=="hayasaka"?"早坂爱":"藤原";
+                item.Text=(item.Checked?"✓ ":"")+name;
+            }
         }
         protected override void OnKeyDown(KeyEventArgs e) {
             base.OnKeyDown(e);
@@ -530,14 +577,14 @@ namespace KaguyaNative
             using(Graphics g=FrameGraphics(b)) {
                 g.Clear(Color.Transparent);
                 using(Brush shadow=new SolidBrush(Color.FromArgb(20,116,65,89)))g.FillEllipse(shadow,142.5f,666,95,8);
-                double s=State.scale,cx=Geometry.Center(s),baseY=675,phase=(Now%(State.sleeping?6:4))/(State.sleeping?6:4);
-                double breathe=1+.012*(.5-.5*Math.Cos(phase*2*Math.PI));double angle=0;
-                if(Dragging){breathe=1;angle=-4;}
+                double s=State.scale,cx=Geometry.Center(s),baseY=675;
+                double angle=0;
+                if(Dragging){angle=-4;}
                 else if(Now-shyStart<1.3) {
-                    double t=((Now-shyStart)%.65)/.65;breathe=1;
+                    double t=((Now-shyStart)%.65)/.65;
                     angle=t<.35?-3*(.5-.5*Math.Cos(t/.35*Math.PI)):t<.7?-3+6*(.5-.5*Math.Cos((t-.35)/.35*Math.PI)):3*(.5+.5*Math.Cos((t-.7)/.3*Math.PI));
                 }
-                GraphicsState save=g.Save();g.TranslateTransform((float)cx,(float)baseY);g.ScaleTransform((float)s,(float)s);g.RotateTransform((float)angle);g.ScaleTransform(1,(float)breathe);
+                GraphicsState save=g.Save();g.TranslateTransform((float)cx,(float)baseY);g.ScaleTransform((float)s,(float)s);g.RotateTransform((float)angle);
                 double f=Math.Min(220.0/512,245.0/576);RectangleF dest=new RectangleF((float)(-512*f/2),(float)(-576*f),(float)(512*f),(float)(576*f));
                 if(State.sleeping) {
                     using(ImageAttributes attr=new ImageAttributes()) {
@@ -574,18 +621,18 @@ namespace KaguyaNative
             Bitmap b=new Bitmap(original.Width,original.Height,PixelFormat.Format32bppPArgb);
             using(Graphics g=Graphics.FromImage(b)) {
                 g.DrawImageUnscaled(original,0,0);g.ScaleTransform(Dpi,Dpi);g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=TextRenderingHint.ClearTypeGridFit;
-                if(State.character=="hayasaka") {
+                if(State.character!="kaguya") {
                     using(Brush background=new SolidBrush(C("#fffafb")))g.FillRectangle(background,45,81,245,63);
-                    TextAt(g,"HAYASAKA · LITTLE COMPANION",8,C("#b58c9a"),new RectangleF(47,83,245,16),StringAlignment.Near);
+                    TextAt(g,IsHayasaka?"HAYASAKA · LITTLE COMPANION":"FUJIWARA · LITTLE COMPANION",8,C("#b58c9a"),new RectangleF(47,83,245,16),StringAlignment.Near);
                     using(Font title=new Font("Microsoft YaHei UI",23,FontStyle.Bold,GraphicsUnit.Pixel))
-                    using(Brush ink=new SolidBrush(C("#443c45")))g.DrawString("早坂爱的茶会",title,ink,43,106);
+                    using(Brush ink=new SolidBrush(C("#443c45")))g.DrawString(CharacterName+"的茶会",title,ink,43,106);
                     RectangleF action=layout["pat"];
                     FillRound(g,action,14,C("#f7ecf0"));
                     TextAt(g,"♡",24,C("#b86981"),new RectangleF(action.X,action.Y+9,action.Width,28),StringAlignment.Center);
                     TextAt(g,InteractionLabel,11,C("#443c45"),new RectangleF(action.X,action.Y+40,action.Width,16),StringAlignment.Center);
                     if(State.sleeping) {
                         using(Brush background=new SolidBrush(C("#f7ecf0")))g.FillRectangle(background,250,266,76,18);
-                        TextAt(g,"叫醒早坂爱",11,C("#443c45"),new RectangleF(244,266,89,18),StringAlignment.Center);
+                        TextAt(g,"叫醒"+CharacterName,11,C("#443c45"),new RectangleF(244,266,89,18),StringAlignment.Center);
                     }
                 }
                 // Render the slider at final DPI and cache it with the current percentage.

@@ -11,10 +11,61 @@ namespace KaguyaNative {
 internal static class Checks {
  static List<object> checks=new List<object>();
  static void Check(bool pass,string name){checks.Add(new{name=name,passed=pass});if(!pass)throw new Exception("Failed: "+name);}
+ internal static void CheckCharacterState(string folder) {
+  string settings=Path.Combine(folder,"character-state-"+Guid.NewGuid().ToString("N"));
+  Directory.CreateDirectory(settings);
+  try {
+   File.WriteAllText(Path.Combine(settings,"pet-state.json"),"{\"character\":\"hayasaka\",\"mood\":31,\"milk\":42,\"sleeping\":true,\"scale\":0.83,\"waterEnabled\":true,\"waterMinutes\":45}");
+   using(Pet pet=new Pet(true,settings)) {
+    Check(pet.State.character=="hayasaka"&&pet.State.mood==31&&pet.State.energy==42&&pet.Frame=="sleep","legacy selected character inherits existing state");
+    pet.SetCharacter("fujiwara");
+    Check(pet.State.mood==80&&pet.State.energy==75&&!pet.State.sleeping&&pet.Frame=="idle","unvisited character starts with independent defaults");
+    pet.Pat();pet.Feed(true);
+    Check(pet.State.mood==93&&pet.State.energy==95,"Fujiwara actions update her own meters");
+    pet.SetCharacter("hayasaka");
+    Check(pet.State.mood==31&&pet.State.energy==42&&pet.State.sleeping&&pet.Frame=="sleep","switch restores Hayasaka meters and sleeping pose");
+    pet.SetCharacter("kaguya");pet.State.mood=16;pet.State.energy=27;pet.Sleep(true);
+    pet.SetCharacter("fujiwara");
+    Check(pet.State.mood==93&&pet.State.energy==95&&!pet.State.sleeping&&pet.Frame=="idle","returning to Fujiwara restores her state and clears previous interaction");
+    Check(pet.State.scale==.83&&pet.State.waterEnabled&&pet.State.waterMinutes==45,"global preferences remain shared");
+   }
+   using(Pet pet=new Pet(true,settings)) {
+    Check(pet.State.character=="fujiwara"&&pet.State.mood==93&&pet.State.energy==95&&!pet.State.sleeping,"restart restores last selected character and her state");
+    pet.SetCharacter("hayasaka");Check(pet.State.mood==31&&pet.State.energy==42&&pet.State.sleeping,"restart retains inactive Hayasaka state");
+    pet.SetCharacter("kaguya");Check(pet.State.mood==16&&pet.State.energy==27&&pet.State.sleeping,"restart retains inactive Kaguya state");
+    pet.SetCharacter("fujiwara");pet.AdvanceMeters();pet.SetCharacter("hayasaka");
+    Check(pet.State.mood==31&&pet.State.energy==42,"meter decay affects only active character");
+    pet.SetCharacter("fujiwara");Check(pet.State.mood==92&&pet.State.energy==94,"active character decay persists across switch");
+   }
+   File.WriteAllText(Path.Combine(settings,"pet-state.json"),"{\"character\":\"fujiwara\",\"mood\":24,\"characters\":null}");
+   using(Pet pet=new Pet(true,settings)) {
+    Check(pet.State.mood==24,"null profile map migrates safely");pet.SetCharacter("kaguya");Check(pet.State.mood==80,"null profile migration keeps other characters independent");
+   }
+  }finally{Directory.Delete(settings,true);}
+ }
+ internal static void CheckCharacterMenu() {
+  using(Pet pet=new Pet(true)) {
+   foreach(float dpi in new float[]{1,1.5f,2}) {
+    pet.UpdateDisplayScale(dpi);
+    using(RoundedMenu menu=pet.CreateMenu()) {
+     ToolStripMenuItem choices=(ToolStripMenuItem)menu.Items["switch-character"];
+     Check(choices.Text=="切换人物"&&choices.DropDownItems.Count==3,"character menu lists all three characters at DPI "+dpi);
+     foreach(string id in new string[]{"fujiwara","kaguya","hayasaka","fujiwara"}) {
+      choices.DropDownItems[id].PerformClick();
+      Check(pet.State.character==id,"direct character selection "+id+" at DPI "+dpi);
+      foreach(ToolStripMenuItem item in choices.DropDownItems)
+       Check(item.Checked==(item.Name==id)&&item.Text.StartsWith("✓ ")==item.Checked,"current character marker refreshes for "+item.Name);
+     }
+    }
+   }
+  }
+ }
  internal static void Run() {
   string folder=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification");Directory.CreateDirectory(folder);
   bool success=false;string error=null;
   try {
+   CheckCharacterState(folder);
+   CheckCharacterMenu();
    using(Pet changingDisplay=new Pet(true)) {
     foreach(float scale in new float[]{1,2,1.25f,1.5f,1}) {
      changingDisplay.UpdateDisplayScale(scale);
@@ -62,9 +113,9 @@ internal static class Checks {
    using(Pet character=new Pet(true,settings)) {
     double mood=character.State.mood,energy=character.State.energy,scale=character.State.scale;
     character.State.sleeping=true;character.Frame="sleep";character.SetWaterReminder(true,45);
-    using(RoundedMenu choices=character.CreateMenu())choices.Items["switch-character"].PerformClick();
+    using(RoundedMenu choices=character.CreateMenu())((ToolStripMenuItem)choices.Items["switch-character"]).DropDownItems["hayasaka"].PerformClick();
     Check(character.State.character=="hayasaka"&&character.CharacterName=="早坂爱","character menu selects Hayasaka");
-    Check(character.State.mood==mood&&character.State.energy==energy&&character.State.scale==scale&&character.State.sleeping&&character.Frame=="sleep"&&character.State.waterEnabled&&character.State.waterMinutes==45,"switch preserves meters size sleeping pose and reminders");
+    Check(character.State.mood==mood&&character.State.energy==energy&&character.State.scale==scale&&!character.State.sleeping&&character.Frame=="idle"&&character.State.waterEnabled&&character.State.waterMinutes==45,"new character starts awake and retains global size and reminders");
     character.State.sleeping=false;character.Frame="idle";
     string[] events={"greeting","interaction","sleeping","tea-sleeping","tea","sleep","wake","water"};
     foreach(string dialogueEvent in events) {
@@ -83,7 +134,7 @@ internal static class Checks {
     character.State.sleeping=true;character.Frame="sleep";beforeBump=character.State.mood;character.Pat();
     Check(character.Frame=="sleep"&&character.State.mood==beforeBump,"Hayasaka head pat respects sleep");
     character.State.sleeping=false;character.Frame="idle";character.SetFrame("pat-notice");
-    character.SetCharacter("kaguya");Check(character.Frame=="idle"&&character.InteractionLabel=="摸摸头"&&!character.Bubble.Contains("碰个拳"),"switch clears previous character pose and dialogue");
+    character.SetCharacter("kaguya");Check(character.Frame=="sleep"&&character.InteractionLabel=="摸摸头"&&!character.Bubble.Contains("碰个拳"),"switch clears previous character pose and dialogue");
     character.SetCharacter("hayasaka");character.Speak("interaction");
 
     foreach(string pose in new string[]{"idle","happy","tea","sleep","water-offer","pat-notice","pat-relaxed"}) {
@@ -97,6 +148,30 @@ internal static class Checks {
     Check(restoredCharacter.State.character=="hayasaka","selected character persists across restart");
     restoredCharacter.SetCharacter("unknown");Check(restoredCharacter.State.character=="hayasaka","invalid character selection is ignored");
     restoredCharacter.SetCharacter("kaguya");Check(restoredCharacter.CharacterName=="辉夜","switch restores Kaguya");
+   }
+   using(Pet chika=new Pet(true,settings)) {
+    chika.SetCharacter("hayasaka");
+    double mood=chika.State.mood,energy=chika.State.energy,scale=chika.State.scale;
+    using(RoundedMenu choices=chika.CreateMenu())((ToolStripMenuItem)choices.Items["switch-character"]).DropDownItems["fujiwara"].PerformClick();
+    Check(chika.State.character=="fujiwara"&&chika.CharacterName=="藤原","character menu directly selects Fujiwara");
+    Check(chika.State.mood==80&&chika.State.energy==75&&chika.State.scale==scale,"Fujiwara starts with independent default meters and global scale");
+    foreach(string evt in new string[]{"greeting","interaction","sleeping","tea-sleeping","tea","sleep","wake","water"}) {
+     chika.Speak(evt);Check(!String.IsNullOrEmpty(chika.Bubble)&&!chika.Bubble.Contains("辉夜"),"Fujiwara dialogue for "+evt);
+    }
+    chika.State.sleeping=false;chika.Pat();Check(chika.Frame=="happy","Fujiwara head pat uses happy pose");
+    chika.Feed(true);Check(chika.Frame=="tea","Fujiwara tea retains existing action");
+    chika.Sleep(true);Check(chika.Frame=="sleep","Fujiwara sleep retains existing action");
+    foreach(string pose in new string[]{"idle","happy","tea","sleep","water-offer"}) {
+     chika.Frame=pose;using(Bitmap preview=chika.RenderBitmap())preview.Save(Path.Combine(folder,"fujiwara-"+pose+".png"));
+    }
+    using(Bitmap panel=chika.PanelBitmap())panel.Save(Path.Combine(folder,"fujiwara-panel.png"));
+    using(Bitmap badge=chika.BadgeBitmap())badge.Save(Path.Combine(folder,"fujiwara-badge.png"));
+    chika.SaveState(true);
+   }
+   using(Pet chika=new Pet(true,settings)) {
+    Check(chika.State.character=="fujiwara"&&chika.Frame=="sleep","Fujiwara selection and sleep survive restart");
+    using(RoundedMenu choices=chika.CreateMenu())((ToolStripMenuItem)choices.Items["switch-character"]).DropDownItems["kaguya"].PerformClick();
+    Check(chika.State.character=="kaguya"&&chika.Frame=="sleep","character cycle restores Kaguya own sleep state");
    }
    Directory.Delete(settings,true);
    CheckWaterReminder(folder);
