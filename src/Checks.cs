@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -59,6 +59,45 @@ internal static class Checks {
    using(Pet waterReloaded=new Pet(true,settings))Check(waterReloaded.State.waterEnabled&&waterReloaded.State.waterMinutes==45,"water interval and enabled setting survive reload");
    File.WriteAllText(Path.Combine(settings,"pet-state.json"),"{\"waterMinutes\":-1}");
    using(Pet invalidWater=new Pet(true,settings))Check(invalidWater.State.waterMinutes==1,"invalid saved water interval is clamped");
+   using(Pet character=new Pet(true,settings)) {
+    double mood=character.State.mood,energy=character.State.energy,scale=character.State.scale;
+    character.State.sleeping=true;character.Frame="sleep";character.SetWaterReminder(true,45);
+    using(RoundedMenu choices=character.CreateMenu())choices.Items["switch-character"].PerformClick();
+    Check(character.State.character=="hayasaka"&&character.CharacterName=="早坂爱","character menu selects Hayasaka");
+    Check(character.State.mood==mood&&character.State.energy==energy&&character.State.scale==scale&&character.State.sleeping&&character.Frame=="sleep"&&character.State.waterEnabled&&character.State.waterMinutes==45,"switch preserves meters size sleeping pose and reminders");
+    character.State.sleeping=false;character.Frame="idle";
+    string[] events={"greeting","interaction","sleeping","tea-sleeping","tea","sleep","wake","water"};
+    foreach(string dialogueEvent in events) {
+     character.State.character="kaguya";character.Speak(dialogueEvent);string kaguyaLine=character.Bubble;
+     character.State.character="hayasaka";character.Speak(dialogueEvent);
+     Check(character.Bubble!=kaguyaLine&&!character.Bubble.Contains("辉夜")&&!character.Bubble.Contains("才不是")&&!character.Bubble.Contains("哼，"),"Hayasaka has her own dialogue for "+dialogueEvent);
+    }
+    double beforeBump=character.State.mood;character.ActivateTarget("pat");
+    Check(character.Frame=="pat-notice"&&character.InteractionLabel=="摸摸头"&&character.State.mood==Math.Min(100,beforeBump+8),"Hayasaka head pat changes pose and retains mood reward");
+    using(Bitmap preview=character.RenderBitmap())preview.Save(Path.Combine(folder,"hayasaka-headpat.png"));
+    character.AdvanceInteraction(character.Now+.7);Check(character.Frame=="pat-relaxed","Hayasaka head pat settles into relaxed pose after initial surprise");
+    character.AdvanceInteraction(character.Now+4);Check(character.Frame=="idle","Hayasaka head pat returns to idle");
+    character.Pat();character.Feed(true);character.AdvanceInteraction(character.Now+.7);
+    Check(character.Frame=="tea","new interaction cancels Hayasaka head pat sequence");
+
+    character.State.sleeping=true;character.Frame="sleep";beforeBump=character.State.mood;character.Pat();
+    Check(character.Frame=="sleep"&&character.State.mood==beforeBump,"Hayasaka head pat respects sleep");
+    character.State.sleeping=false;character.Frame="idle";character.SetFrame("pat-notice");
+    character.SetCharacter("kaguya");Check(character.Frame=="idle"&&character.InteractionLabel=="摸摸头"&&!character.Bubble.Contains("碰个拳"),"switch clears previous character pose and dialogue");
+    character.SetCharacter("hayasaka");character.Speak("interaction");
+
+    foreach(string pose in new string[]{"idle","happy","tea","sleep","water-offer","pat-notice","pat-relaxed"}) {
+     character.Frame=pose;using(Bitmap preview=character.RenderBitmap())preview.Save(Path.Combine(folder,"hayasaka-"+pose+".png"));
+    }
+    using(Bitmap panel=character.PanelBitmap())panel.Save(Path.Combine(folder,"hayasaka-panel.png"));
+    using(Bitmap badge=character.BadgeBitmap())badge.Save(Path.Combine(folder,"hayasaka-badge.png"));
+    character.SaveState(true);
+   }
+   using(Pet restoredCharacter=new Pet(true,settings)) {
+    Check(restoredCharacter.State.character=="hayasaka","selected character persists across restart");
+    restoredCharacter.SetCharacter("unknown");Check(restoredCharacter.State.character=="hayasaka","invalid character selection is ignored");
+    restoredCharacter.SetCharacter("kaguya");Check(restoredCharacter.CharacterName=="辉夜","switch restores Kaguya");
+   }
    Directory.Delete(settings,true);
    CheckWaterReminder(folder);
    using(Pet pet=new Pet(true)) {
@@ -74,7 +113,7 @@ internal static class Checks {
     Check((Native.GetWindowLong(pet.Handle,-20)&0x80)!=0&&(Native.GetWindowLong(pet.Handle,-20)&0x40000)==0,"companion is a tool window without taskbar application style");
     using(RoundedMenu popup=pet.CreateMenu()) {
      Check(!popup.Region.IsVisible(0,0)&&popup.Region.IsVisible(popup.Width/2,popup.Height/2),"context menu has rounded window corners");
-     Check(popup.Items.Count==11&&popup.Items[0].Text=="显示辉夜"&&popup.Items[4].Name=="panel-enabled"&&popup.Items[5].Name=="water-toggle"&&popup.Items[6].Name=="water-interval"&&popup.Items[7].Text=="回到屏幕右下角"&&popup.Items[8] is ToolStripSeparator&&popup.Items[10].Text=="退出辉夜","context menu adds panel switch and preserves existing action ordering and separator");
+     Check(popup.Items.Count==12&&popup.Items[0].Text=="显示辉夜"&&popup.Items[4].Name=="panel-enabled"&&popup.Items[5].Name=="water-toggle"&&popup.Items[6].Name=="water-interval"&&popup.Items[7].Text=="回到屏幕右下角"&&popup.Items[8] is ToolStripSeparator&&popup.Items[10].Text=="退出辉夜","context menu adds panel switch and preserves existing action ordering and separator");
      Check(((ToolStripMenuItem)popup.Items["panel-enabled"]).Checked,"menu panel toggle reflects enabled state");
      Point menuAnchor=new Point(600,500);IntPtr foreground=Native.GetForegroundWindow();
      popup.ShowAnchored(pet,menuAnchor);Application.DoEvents();

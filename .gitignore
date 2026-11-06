@@ -16,3 +16,7 @@ obj/
 # 图片生成中间物与本地临时脚本
 /output/
 /tmp/
+
+# 已从程序中移除的碰拳试版
+/assets/hayasaka/fist-bump.png
+/tools/prepare-hayasaka-fist.py
