@@ -15,6 +15,16 @@ internal static class Checks {
   string folder=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"verification");Directory.CreateDirectory(folder);
   bool success=false;string error=null;
   try {
+   using(Pet changingDisplay=new Pet(true)) {
+    foreach(float scale in new float[]{1,2,1.25f,1.5f,1}) {
+     changingDisplay.UpdateDisplayScale(scale);
+     using(Bitmap badge=changingDisplay.BadgeBitmap())Check(badge.Width==(int)Math.Round(190*scale)&&changingDisplay.ClientSize.Width==(int)Math.Round(380*scale)&&changingDisplay.UiAssetScale>=scale,"display change rebuilds physical pixels at scale "+scale);
+     using(RoundedMenu popup=changingDisplay.CreateMenu())Check(popup.Width==(int)Math.Round(154*scale),"display change rebuilds menu geometry at scale "+scale);
+    }
+    changingDisplay.Show();Application.DoEvents();changingDisplay.ShowMenu(Cursor.Position);
+    changingDisplay.ActiveMenu.Items[10].PerformClick();Application.DoEvents();
+    Check(changingDisplay.IsDisposed,"exit menu closes application window after repeated DPI changes");
+   }
    string settings=Path.Combine(folder,"settings-check-"+Guid.NewGuid().ToString("N"));
    using(Pet first=new Pet(true,settings)) {
     Check(first.State.topmost&&first.TopMost&&first.State.panelEnabled,"first launch defaults to topmost and panel enabled");

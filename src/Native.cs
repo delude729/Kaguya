@@ -17,6 +17,13 @@ namespace KaguyaNative {
             internal uint Compression,SizeImage; internal int XPels,YPels; internal uint Used,Important;
         }
         [DllImport("user32.dll")] internal static extern bool SetProcessDPIAware();
+        [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+        [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
+        [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(Point point,uint flags);
+        [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor,int kind,out uint x,out uint y);
+        internal static void EnableMonitorDpi(){try{SetProcessDpiAwarenessContext(new IntPtr(-3));}catch(EntryPointNotFoundException){SetProcessDPIAware();}}
+        internal static float WindowScale(IntPtr window){try{return GetDpiForWindow(window)/96f;}catch(EntryPointNotFoundException){return ScaleAt(System.Windows.Forms.Cursor.Position);}}
+        internal static float ScaleAt(System.Drawing.Point point){try{uint x,y;if(GetDpiForMonitor(MonitorFromPoint(new Point(point.X,point.Y),2),0,out x,out y)==0)return x/96f;}catch(DllNotFoundException){}catch(EntryPointNotFoundException){}using(Graphics g=Graphics.FromHwnd(IntPtr.Zero))return g.DpiX/96f;}
         [DllImport("user32.dll",CharSet=CharSet.Unicode)] internal static extern IntPtr FindWindow(string cls,string text);
         [DllImport("user32.dll")] internal static extern bool PostMessage(IntPtr h,int m,IntPtr w,IntPtr l);
         [DllImport("user32.dll")] internal static extern IntPtr SendMessage(IntPtr h,int m,IntPtr w,IntPtr l);

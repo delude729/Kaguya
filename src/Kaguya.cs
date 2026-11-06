@@ -17,7 +17,7 @@ namespace KaguyaNative
     {
         [STAThread] static void Main(string[] args)
         {
-            Native.SetProcessDPIAware(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+            Native.EnableMonitorDpi(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             try {
                 if(args.Length>0 && args[0]=="--self-test") { Checks.Run(); return; }
                 if(args.Length>0 && args[0]=="--quit") { Native.PostMessage(Native.FindWindow(null,Pet.Title),0x10,IntPtr.Zero,IntPtr.Zero); return; }
@@ -70,9 +70,10 @@ namespace KaguyaNative
         internal State State=new State();
         internal bool PanelOpen,Dragging;
         internal string Frame="idle",Bubble="";
-        internal readonly float Dpi;
-        internal readonly float UiAssetScale;
-        readonly string uiDirectory;
+        internal float Dpi;
+        internal float UiAssetScale;
+        string uiDirectory;
+        float menuScale;
         readonly bool testing;
         readonly bool isolatedSettings;
         readonly string root=AppDomain.CurrentDomain.BaseDirectory;
@@ -110,7 +111,7 @@ namespace KaguyaNative
         {
             testing=test;isolatedSettings=test&&settingsDirectory!=null;
             if(settingsDirectory!=null)data=settingsDirectory;
-            using(Graphics g=Graphics.FromHwnd(IntPtr.Zero)) Dpi=g.DpiX/96f;
+            Dpi=Native.ScaleAt(Cursor.Position);
             UiAssetScale=SelectUiScale(Dpi);
             uiDirectory=UiAssetScale==1?Path.Combine("assets","ui"):Path.Combine("assets","ui","dpi-"+Math.Round(UiAssetScale*100));
             hands=new HandCursors();
@@ -136,7 +137,7 @@ namespace KaguyaNative
                 tray.MouseClick+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)ShowPet();else if(e.Button==MouseButtons.Right)ShowMenu(Cursor.Position);};
             }
             timer.Interval=16;timer.Tick+=delegate{TickFrame();};
-            Shown+=delegate{ready=true;Say("今天，就让我在这里陪你吧");PaintFrame();if(!test){menu=CreateMenu();IntPtr warmMenuHandle=menu.Handle;using(Bitmap preview=new Bitmap(menu.Width,menu.Height))menu.DrawToBitmap(preview,new Rectangle(Point.Empty,menu.Size));timer.Start();}};
+            Shown+=delegate{UpdateDisplayScale(Native.WindowScale(Handle));ready=true;Say("今天，就让我在这里陪你吧");PaintFrame();if(!test){menu=CreateMenu();IntPtr warmMenuHandle=menu.Handle;using(Bitmap preview=new Bitmap(menu.Width,menu.Height))menu.DrawToBitmap(preview,new Rectangle(Point.Empty,menu.Size));timer.Start();}};
         }
         RectangleF ReadRect(Dictionary<string,object> d){return new RectangleF(Convert.ToSingle(d["x"]),Convert.ToSingle(d["y"]),Convert.ToSingle(d["width"]),Convert.ToSingle(d["height"]));}
         void LoadImage(string name,string path) {using(Bitmap src=new Bitmap(Path.Combine(root,path))) {Bitmap b=new Bitmap(src.Width,src.Height,PixelFormat.Format32bppPArgb);using(Graphics g=Graphics.FromImage(b)){g.CompositingMode=CompositingMode.SourceCopy;g.DrawImageUnscaled(src,0,0);}images.Add(name,b);}}
@@ -269,6 +270,12 @@ namespace KaguyaNative
             return "";
         }
         protected override void WndProc(ref Message m) {
+            if(m.Msg==0x2e0&&ready){
+                Native.Rect suggested=(Native.Rect)Marshal.PtrToStructure(m.LParam,typeof(Native.Rect));
+                UpdateDisplayScale((m.WParam.ToInt64()&65535)/96f);
+                Location=ClampLocation(new Point(suggested.Left,suggested.Top),null);
+                lastScene="";PaintFrame();SaveState(false);m.Result=IntPtr.Zero;return;
+            }
             if(m.Msg==0x8001){ShowPet();return;}
             // A desktop companion must not activate WinForms' hidden taskbar owner.
             if(m.Msg==0x21){m.Result=(IntPtr)3;return;}
@@ -277,7 +284,19 @@ namespace KaguyaNative
                 m.Result=Target(p)!=""?(IntPtr)1:new IntPtr(-1);return;
             }
             base.WndProc(ref m);
-            if((m.Msg==0x7e||m.Msg==0x2e0)&&ready){Location=ClampLocation(Location,null);PaintFrame();SaveState(false);}
+            if((m.Msg==0x7e||m.Msg==0x1a)&&ready){BeginInvoke((Action)delegate{if(disposed)return;EndDrag();if(menu!=null)menu.Close();Location=ClampLocation(Location,null);UpdateDisplayScale(Native.WindowScale(Handle));lastScene="";PaintFrame();SaveState(false);});}
+        }
+        internal void UpdateDisplayScale(float scale) {
+            if(scale<=0||Math.Abs(scale-Dpi)<.001f)return;
+            EndDrag();
+            if(menu!=null){menu.Close();menu.Dispose();menu=null;}
+            Dpi=scale;UiAssetScale=SelectUiScale(Dpi);
+            uiDirectory=UiAssetScale==1?Path.Combine("assets","ui"):Path.Combine("assets","ui","dpi-"+Math.Round(UiAssetScale*100));
+            ClientSize=new Size((int)Math.Round(380*Dpi),(int)Math.Round(726*Dpi));
+            var names=new List<string>(images.Keys);
+            foreach(string name in names)if(name.StartsWith("panel-")||name.StartsWith("badge-")){images[name].Dispose();images.Remove(name);LoadUiImage(name);}
+            if(cachedPanel!=null){cachedPanel.Dispose();cachedPanel=null;}
+            cachedPanelKey="";characterPixels=null;surface.Dispose();lastScene="";
         }
         protected override void OnMouseDown(MouseEventArgs e) {
             base.OnMouseDown(e);
@@ -383,7 +402,9 @@ namespace KaguyaNative
         void ShowPet(){Show();PaintFrame();}
         internal void ShowMenu(Point p) {
             
-            if(menu==null)menu=CreateMenu();
+            float targetScale=Native.ScaleAt(p);
+            if(menu!=null&&Math.Abs(menuScale-targetScale)>.001f){menu.Close();menu.Dispose();menu=null;}
+            if(menu==null){menuScale=targetScale;menu=CreateMenu(targetScale);}
             menu.Items["feed"].Enabled=!State.sleeping;
             menu.Items["sleep"].Text=State.sleeping?"叫醒辉夜":"休息一会";
             ((ToolStripMenuItem)menu.Items["topmost"]).Checked=State.topmost;
@@ -392,8 +413,9 @@ namespace KaguyaNative
             ((RoundedMenu)menu).ShowAnchored(this,p);
         }
         internal RoundedMenu ActiveMenu {get{return menu as RoundedMenu;}}
-        internal RoundedMenu CreateMenu() {
-            RoundedMenu result=new RoundedMenu(Dpi);
+        internal RoundedMenu CreateMenu() {return CreateMenu(Dpi);}
+        RoundedMenu CreateMenu(float scale) {
+            RoundedMenu result=new RoundedMenu(scale);
             result.PopupOwner=Handle;
             result.Items.Add("显示辉夜",null,delegate{ShowPet();});
             ToolStripItem feed=result.Items.Add("一起喝茶",null,delegate{ShowPet();ActivateTarget("feed");});feed.Name="feed";feed.Enabled=!State.sleeping;
@@ -401,7 +423,7 @@ namespace KaguyaNative
             ToolStripMenuItem top=new ToolStripMenuItem("始终置顶",null,delegate{ActivateTarget("topmost");});top.Checked=State.topmost;top.Name="topmost";top.Tag="toggle";top.CheckOnClick=true;result.Items.Add(top);
             ToolStripMenuItem panel=new ToolStripMenuItem("启用面板",null,delegate{ActivateTarget("panel-enabled");});panel.Checked=State.panelEnabled;panel.Name="panel-enabled";panel.Tag="toggle";panel.CheckOnClick=true;result.Items.Add(panel);
             ToolStripMenuItem water=new ToolStripMenuItem("喝水提醒",null,delegate{SetWaterReminder(!State.waterEnabled,State.waterMinutes);});water.Checked=State.waterEnabled;water.Name="water-toggle";water.Tag="toggle";water.CheckOnClick=true;result.Items.Add(water);
-            result.Items.Add(new WaterIntervalItem(Dpi,delegate{return State.waterMinutes;},delegate(int minutes){return SetWaterReminder(State.waterEnabled,minutes);}));
+            result.Items.Add(new WaterIntervalItem(scale,delegate{return State.waterMinutes;},delegate(int minutes){return SetWaterReminder(State.waterEnabled,minutes);}));
             result.Items.Add("回到屏幕右下角",null,delegate{ResetPosition();PaintFrame();});result.Items.Add(new ToolStripSeparator());
             result.Items.Add("暂时隐藏",null,delegate{Hide();});result.Items.Add("退出辉夜",null,delegate{Close();});result.Prepare();return result;
         }

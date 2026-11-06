@@ -13,6 +13,6 @@
 bin/
 obj/
 
-# 图片生成中间物
+# 图片生成中间物与本地临时脚本
 /output/
-/tmp/imagegen/
+/tmp/
