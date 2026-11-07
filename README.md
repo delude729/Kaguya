@@ -41,10 +41,10 @@
 心情、元气和休息状态按人物独立保存；大小、置顶、面板开关和喝水提醒为全局设置。旧版存档的状态归入当时选中的人物，其他人物从默认状态开始。
 
 <details>
-<summary><strong>看看辉夜的五种状态</strong></summary>
+<summary><strong>看看辉夜的动作</strong></summary>
 
 <p align="center">
-  <img src="docs/states.png" width="880" alt="辉夜的五种状态：待机、摸摸头、一起喝茶、休息中、喝水提醒（茶会面板展开）">
+  <img src="docs/states.png" width="880" alt="辉夜的状态：待机、摸摸头、一起喝茶、休息中、喝水提醒（茶会面板展开）">
 </p>
 
 </details>
