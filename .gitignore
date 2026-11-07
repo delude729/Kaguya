@@ -16,6 +16,8 @@ obj/
 # 图片生成中间物与本地临时脚本
 /output/
 /tmp/
+# 本地预览用的 4:3 衍生图（由 tmp/make-4x3.py 生成，README 不引用）
+/docs-4x3/
 
 # 已从程序中移除的碰拳试版
 /assets/hayasaka/fist-bump.png

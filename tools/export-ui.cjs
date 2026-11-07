@@ -4,6 +4,7 @@ const fs=require('fs'),path=require('path');
 const root=path.resolve(__dirname,'..');
 const original=path.join(root,'reference-ui');
 const uiScale=Number(process.argv.find(a=>a.startsWith('--ui-scale='))?.split('=')[1]||1);
+const headerOnly=process.argv.includes('--header-only');
 const badgeOnly=process.argv.includes('--badge-only');
 if(!Number.isFinite(uiScale)||uiScale<1||uiScale>4)throw new Error('Invalid UI scale');
 const output=uiScale===1?path.join(root,'assets/ui'):path.join(root,`assets/ui/dpi-${Math.round(uiScale*100)}`);
@@ -34,6 +35,15 @@ app.whenReady().then(async()=>{
  await new Promise(r=>setTimeout(r,150));
  const layout=await w.webContents.executeJavaScript(`(()=>{const out={};for(const id of ['panel','close','feed','pat','sleep','topmost','hide','badge','character','mood','energy','mood-label','energy-label','size-slider','size-value']){const r=document.getElementById(id).getBoundingClientRect();out[id]={x:r.x,y:r.y,width:r.width,height:r.height};}out.scales=[...document.querySelectorAll('[data-scale]')].map(e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};});return out;})()`);
  if(uiScale===1&&!badgeOnly)fs.writeFileSync(path.join(root,'assets/ui/layout.json'),JSON.stringify(layout,null,2));
+ // Character headers share the exact CSS, font rasterizer and device scale.
+ for(const [character,english,name] of [['hayasaka','HAYASAKA','早坂爱'],['fujiwara','FUJIWARA','藤原']]) {
+ await w.webContents.executeJavaScript(`document.querySelector('.eyebrow').textContent=${JSON.stringify(english+' · LITTLE COMPANION')};document.querySelector('h1').innerHTML=${JSON.stringify(name+'的茶会 <span>✧</span>')}`);
+ await w.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+ const img=await w.webContents.capturePage({x:0,y:0,width:380,height:419});
+ await writePng(`panel-header-${character}.png`,img);
+ }
+ if(headerOnly){w.destroy();app.quit();return;}
+ await w.webContents.executeJavaScript(`document.querySelector('.eyebrow').textContent='KAGUYA · LITTLE COMPANION';document.querySelector('h1').innerHTML='辉夜的茶会 <span>✧</span>'`);
  const dimensions=[];
  if(!badgeOnly)for(let sleep=0;sleep<2;sleep++)for(let top=0;top<2;top++)for(let scale=0;scale<3;scale++){
  await w.webContents.executeJavaScript(`document.querySelector('#sleep span').textContent=${JSON.stringify(sleep?'叫醒辉夜':'休息一会')};document.querySelector('#topmost span').textContent=${JSON.stringify(top?'开':'关')};document.querySelector('#topmost span').classList.toggle('on',${!!top});document.querySelectorAll('[data-scale]').forEach((e,i)=>e.classList.toggle('selected',i===${scale}));`);

@@ -135,6 +135,7 @@ namespace KaguyaNative
             for(int s=0;s<2;s++)for(int t=0;t<2;t++)for(int z=0;z<3;z++) {
                 string name="panel-"+s+"-"+t+"-"+z;LoadUiImage(name);
             }
+            foreach(string person in new string[]{"hayasaka","fujiwara"})LoadUiImage("panel-header-"+person);
             for(int s=0;s<2;s++)for(int o=0;o<2;o++) {
                 string name="badge-"+s+"-"+o;LoadUiImage(name);
             }
@@ -622,10 +623,12 @@ namespace KaguyaNative
             using(Graphics g=Graphics.FromImage(b)) {
                 g.DrawImageUnscaled(original,0,0);g.ScaleTransform(Dpi,Dpi);g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=TextRenderingHint.ClearTypeGridFit;
                 if(State.character!="kaguya") {
-                    using(Brush background=new SolidBrush(C("#fffafb")))g.FillRectangle(background,45,81,245,63);
-                    TextAt(g,IsHayasaka?"HAYASAKA · LITTLE COMPANION":"FUJIWARA · LITTLE COMPANION",8,C("#b58c9a"),new RectangleF(47,83,245,16),StringAlignment.Near);
-                    using(Font title=new Font("Microsoft YaHei UI",23,FontStyle.Bold,GraphicsUnit.Pixel))
-                    using(Brush ink=new SolidBrush(C("#443c45")))g.DrawString(CharacterName+"的茶会",title,ink,43,106);
+                    // Copy browser-rendered header at physical pixels, preserving CSS
+                    // letter spacing, baseline, weight and the title ornament.
+                    GraphicsState headerState=g.Save();g.ResetTransform();
+                    Rectangle header=Rectangle.FromLTRB((int)Math.Round(45*Dpi),(int)Math.Round(81*Dpi),(int)Math.Round(290*Dpi),(int)Math.Round(144*Dpi));
+                    g.DrawImage(images["panel-header-"+State.character],header,header,GraphicsUnit.Pixel);
+                    g.Restore(headerState);
                     RectangleF action=layout["pat"];
                     FillRound(g,action,14,C("#f7ecf0"));
                     TextAt(g,"♡",24,C("#b86981"),new RectangleF(action.X,action.Y+9,action.Width,28),StringAlignment.Center);
