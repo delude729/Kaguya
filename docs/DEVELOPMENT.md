@@ -68,3 +68,4 @@ electron tools\export-ui.cjs --ui-scale=1.25
 - `tools/extract-original-cursors.ps1 -ElectronExe <path>`：从原 Electron 可执行文件中提取光标资源，输出到 `verification/original-cursors`。
 - `tools/build-kaguya-icon.ps1`：从 `assets/kaguya/idle.png` 生成 16–256px 的多尺寸 ICO。
 - `tools/verify-kaguya-icon.ps1`：检查 EXE 与 Shell 图标非空，结果写入 `verification/icon-check.json`。
+- `tools/make-readme-hero.py`：从 `assets/*/idle.png` 和各角色文案重新绘制 README 顶部的三人物横幅 `docs/characters.png`（需要 Python 与 Pillow）。
